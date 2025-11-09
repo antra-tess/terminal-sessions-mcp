@@ -1,28 +1,35 @@
 # Terminal Sessions MCP
 
-**Persistent terminal session management with Web GUI and MCP integration for AI assistants**
+**Interactive, persistent terminal sessions for AI assistants via Model Context Protocol**
 
-[![Web GUI Demo](docs/screenshots/web-gui-demo.png)](docs/screenshots/web-gui-demo.png)
+![Web GUI Demo](docs/screenshots/web-gui-demo.gif)
 
-This package provides a complete solution for managing persistent terminal sessions with intelligent startup detection, log search, **real-time web GUI**, **terminal screenshots**, and seamless integration with AI assistants through the Model Context Protocol (MCP).
+## Why This Matters
 
-## Features
+Most terminal tools for AI assistants execute commands in isolated, short-lived shells. This creates fundamental limitations:
 
-✅ **Web GUI** - Beautiful dashboard with xterm.js terminal emulator  
-✅ **Mouse Support** - Full mouse interaction in TUI apps (Midnight Commander, htop, etc.)  
-✅ **Real TUI Support** - Proper rendering of terminal control sequences and colors  
-✅ **Dynamic Resize** - Automatic terminal resizing with proper coordinate mapping  
-✅ **Direct Input** - Type naturally into the terminal with full keyboard support  
-✅ **Persistent Sessions** - Commands like `cd` and `export` persist across AI responses  
-✅ **Smart Service Starting** - Detects when services are ready or have errors  
-✅ **Log Search** - Find patterns in output with context  
-✅ **Terminal Screenshots** - Capture visually rich terminal output 📸  
-✅ **Live Updates** - Real-time streaming via Socket.IO  
-✅ **Multi-Service Management** - Track multiple services by name  
-✅ **MCP Integration** - Ready for AI assistant integration (Cursor, Claude Desktop, etc.)  
-✅ **Interactive Support** - Send input and signals to running processes  
+- **No state persistence** - Every command starts fresh; `cd` and `export` don't persist
+- **No interactivity** - Can't handle password prompts, confirmations, or interactive tools
+- **No process control** - Can't send signals (Ctrl+C), can't gracefully stop long-running processes
+- **Sessions die with restarts** - Closing Cursor/Claude Desktop kills all running processes
+- **No context** - Can't search through command history or previous output
 
-## Quick Start
+**Terminal Sessions MCP solves all of this.** Your AI assistant gets true persistent sessions that survive restarts, support interactive workflows, and maintain full context.
+
+## MCP Features
+
+✅ **Truly Persistent Sessions** - Sessions survive Cursor/IDE restarts, keeping all state  
+✅ **Interactive Workflows** - Handle password prompts, confirmations, and interactive tools  
+✅ **Process Control** - Send signals (SIGINT, SIGTERM, SIGTSTP) to running processes  
+✅ **Stateful Shell** - `cd`, `export`, and other state changes persist across AI responses  
+✅ **Log Search** - Search through command history and output with regex and context  
+✅ **Service Management** - Start services with intelligent readiness detection  
+✅ **Smart Command Execution** - Detects when commands complete, handles long-running processes  
+✅ **Multi-Session Management** - Track multiple services/sessions by name  
+✅ **Terminal Screenshots** - Capture visually rich terminal output for debugging  
+✅ **Real-Time Streaming** - Watch output as it happens, not just final results  
+
+## Quick Start for AI Assistants
 
 ### 1. Install
 
@@ -30,32 +37,19 @@ This package provides a complete solution for managing persistent terminal sessi
 npm install terminal-sessions-mcp
 ```
 
-### 2. Start the Server (with Web GUI)
+### 2. Start the Session Server
 
 ```bash
 npx session-server
-# Opens session server on port 3100
-# Opens web GUI on http://localhost:3200
+# Starts on port 3100 (with optional GUI on port 3200)
 ```
 
-**Headless mode (server only, no GUI):**
+**Headless mode (no GUI):**
 ```bash
 npx session-server --headless
-# or
-HEADLESS=true npx session-server
 ```
 
-The web GUI provides:
-- 📊 Dashboard showing all active sessions with live status
-- 🖥️ Full xterm.js terminal emulator with 256-color support
-- 🖱️ Complete mouse support (clicks, drags, scrolling in TUI apps)
-- ⌨️ Direct keyboard input with proper key code forwarding
-- 📐 Automatic resize handling for perfect coordinate mapping
-- 🎨 Beautiful GitHub-inspired dark theme
-- 🔄 Real-time output streaming
-- ⚡ Signal controls (Ctrl+C, Ctrl+Z, SIGTERM)
-
-### 3. Configure MCP for AI Assistants
+### 3. Configure MCP Integration
 
 Add to your `~/.cursor/mcp.json` or Claude Desktop config:
 
@@ -76,9 +70,39 @@ Add to your `~/.cursor/mcp.json` or Claude Desktop config:
 
 **Note:** Replace `/absolute/path/to/` with your actual installation path. The session server must be running on the specified port before the MCP server connects.
 
+### 4. Use with Your AI Assistant
+
+Your AI assistant now has access to these MCP tools:
+
+- `startService` - Start a service with readiness detection
+- `runCommand` - Execute a command in a session
+- `tailLogs` - Get recent output from a session  
+- `searchLogs` - Search through output with regex
+- `sendInput` - Send input to interactive prompts
+- `sendSignal` - Send signals (Ctrl+C, etc.) to processes
+- `listSessions` - See all active sessions
+- `killSession` - Stop a session gracefully or forcefully
+- `takeScreenshot` - Capture terminal visual state
+
+## Web GUI (Optional)
+
+The server includes an optional web-based GUI for human operators to monitor and interact with sessions:
+
+**Features:**
+- 📊 Dashboard showing all active sessions with live status
+- 🖥️ Full xterm.js terminal emulator with 256-color support
+- 🖱️ Complete mouse support in TUI apps (Midnight Commander, htop, etc.)
+- ⌨️ Direct keyboard input with proper key code forwarding
+- 📐 Automatic resize handling for perfect coordinate mapping
+- 🎨 Beautiful GitHub-inspired dark theme
+- 🔄 Real-time output streaming
+- ⚡ Signal controls (Ctrl+C, Ctrl+Z, SIGTERM)
+
+**Access:** Open `http://localhost:3200` when running with GUI enabled (default), or use `--headless` to disable.
+
 ## TUI Control Sequences Support
 
-With the web GUI and xterm.js, all terminal control sequences work perfectly:
+All terminal control sequences work perfectly, enabling rich TUI applications:
 
 [![TUI Controls](docs/screenshots/tui-controls.png)](docs/screenshots/tui-controls.png)
 

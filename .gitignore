@@ -3,4 +3,7 @@ dist/
 *.log
 .DS_Store
 *.tsbuildinfo
-
+terminal-art*
+terminal_art*
+run-art.sh
+terminal_streams*
