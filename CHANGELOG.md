@@ -4,6 +4,17 @@
 
 ### Added
 
+- **Direct Keyboard Input** ⌨️ - Type directly in the terminal, all keys forwarded to PTY
+  - Arrow keys (←↑↓→)
+  - Modifier keys (Ctrl, Alt, Shift)
+  - Tab completion
+  - All special characters
+  - Real terminal experience in the browser
+- **Signal Controls** - Practical buttons for process management
+  - ^C button (SIGINT) - Interrupt processes
+  - ^Z button (SIGTSTP) - Suspend processes
+  - TERM button (SIGTERM) - Terminate gracefully
+  - Replaces less useful screenshot button
 - **Web GUI** 🎨 - Beautiful web interface for terminal session management
   - xterm.js-based terminal rendering with full TUI support
   - Dashboard showing all active sessions
