@@ -275,6 +275,10 @@ export class RobustSessionClient extends EventEmitter {
     return this.request('session.screenshot', { sessionId, ...options });
   }
   
+  async resizeSession(sessionId: string, cols: number, rows: number) {
+    return this.request('session.resize', { sessionId, cols, rows });
+  }
+  
   close() {
     // Cancel reconnection
     if (this.reconnectTimer) {

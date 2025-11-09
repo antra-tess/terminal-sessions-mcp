@@ -453,10 +453,16 @@ export class PersistentSessionServer extends EventEmitter {
       throw new Error(`Session ${sessionId} not found`);
     }
 
-    if (lines) {
-      return session.logs.slice(-lines);
+    // Include any incomplete line still in the buffer (like the initial prompt)
+    let output = [...session.logs];
+    if (session.lineBuffer.length > 0) {
+      output.push(session.lineBuffer);
     }
-    return session.logs;
+
+    if (lines) {
+      return output.slice(-lines);
+    }
+    return output;
   }
 
   /**
@@ -517,6 +523,22 @@ export class PersistentSessionServer extends EventEmitter {
       lastActivity: session.lastActivity,
       logSize: session.logs.length
     }));
+  }
+
+  /**
+   * Resize a session's PTY (important for mouse support in TUI apps)
+   */
+  resizeSession(sessionId: string, cols: number, rows: number): void {
+    const session = this.sessions.get(sessionId);
+    if (!session || !session.isAlive) {
+      throw new Error(`Session ${sessionId} not found or not alive`);
+    }
+
+    try {
+      session.shell.resize(cols, rows);
+    } catch (error: any) {
+      throw new Error(`Failed to resize session: ${error.message}`);
+    }
   }
 
   /**

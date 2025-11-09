@@ -27,28 +27,31 @@ This package provides a complete solution for managing persistent terminal sessi
 npm install terminal-sessions-mcp
 ```
 
-### 2. Start the Session Server
+### 2. Start the Server (with Web GUI)
 
 ```bash
 npx session-server
+# Opens session server on port 3100
+# Opens web GUI on http://localhost:3200
 ```
 
-### 3. Start the Web GUI (Optional)
-
+**Headless mode (server only, no GUI):**
 ```bash
-npx session-gui
-# Then open http://localhost:3200
+npx session-server --headless
+# or
+HEADLESS=true npx session-server
 ```
 
 The web GUI provides:
 - 📊 Dashboard showing all active sessions
-- 🖥️ xterm.js terminal with proper TUI rendering
-- 💬 Command input for interactive use
+- 🖥️ xterm.js terminal with proper TUI rendering and mouse support
+- 🖱️ Full mouse support for TUI apps (mc, htop, etc.)
+- 💬 Direct terminal input (type naturally!)
 - 📸 Screenshot button to capture terminal state
 - 🎨 Beautiful dark theme
 - 🔄 Live updates in real-time
 
-### 4. Configure MCP for AI Assistants
+### 3. Configure MCP for AI Assistants
 
 Add to your `~/.cursor/mcp.json` or Claude Desktop config:
 

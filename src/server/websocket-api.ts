@@ -194,6 +194,11 @@ export class SessionAPI {
           result = await this.server.takeScreenshot(params.sessionId, params);
           break;
           
+        case 'session.resize':
+          this.server.resizeSession(params.sessionId, params.cols, params.rows);
+          result = { success: true };
+          break;
+          
         default:
           throw new Error(`Unknown method: ${method}`);
       }

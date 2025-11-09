@@ -50,8 +50,12 @@ export class WebGUIServer {
   }
 
   private setupRoutes(): void {
-    // Serve static files from source directory
-    const publicDir = path.join(__dirname, '../../../gui/public');
+    // Serve static files - works for both ts-node and compiled versions
+    // When ts-node: __dirname = .../terminal-sessions-mcp/gui/src
+    // When compiled: __dirname = .../terminal-sessions-mcp/dist/gui/src
+    const publicDir = __dirname.includes('/dist/')
+      ? path.join(__dirname, '../../../gui/public')  // Compiled version
+      : path.join(__dirname, '../public');           // ts-node version
     this.app.use(express.static(publicDir));
 
     // API endpoints
@@ -91,7 +95,9 @@ export class WebGUIServer {
 
     // Main page
     this.app.get('/', (req, res) => {
-      const indexPath = path.join(__dirname, '../../../gui/public/index.html');
+      const indexPath = __dirname.includes('/dist/')
+        ? path.join(__dirname, '../../../gui/public/index.html')  // Compiled version
+        : path.join(__dirname, '../public/index.html');           // ts-node version
       res.sendFile(indexPath);
     });
   }
@@ -165,6 +171,15 @@ export class WebGUIServer {
         try {
           await this.sessionClient.killSession(data.sessionId, data.graceful !== false);
           socket.emit('kill-success', { sessionId: data.sessionId });
+        } catch (error: any) {
+          socket.emit('error', { message: error.message });
+        }
+      });
+
+      // Handle terminal resize (important for mouse support in TUI apps)
+      socket.on('resize', async (data: { sessionId: string; cols: number; rows: number }) => {
+        try {
+          await this.sessionClient.resizeSession(data.sessionId, data.cols, data.rows);
         } catch (error: any) {
           socket.emit('error', { message: error.message });
         }

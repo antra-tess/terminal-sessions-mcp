@@ -104,10 +104,6 @@ async function createTerminalView(sessionId) {
     <div id="terminal-container">
       <div id="terminal"></div>
     </div>
-    <div class="input-container">
-      <input type="text" id="command-input" placeholder="Type command and press Enter, or use terminal directly..." />
-      <button onclick="sendCommand()">Send</button>
-    </div>
   `;
   
   // Initialize xterm.js
@@ -137,7 +133,9 @@ async function createTerminalView(sessionId) {
     fontSize: 14,
     cursorBlink: true,
     convertEol: true,
-    scrollback: 10000
+    scrollback: 10000,
+    // Enable right-click for context menus in TUI apps
+    rightClickSelectsWord: false
   });
   
   // Add addons (use the correct exported constructors)
@@ -150,8 +148,23 @@ async function createTerminalView(sessionId) {
   terminal.open(document.getElementById('terminal'));
   fitAddon.fit();
   
+  // Send initial terminal size to PTY (important for mouse support)
+  socket.emit('resize', {
+    sessionId: sessionId,
+    cols: terminal.cols,
+    rows: terminal.rows
+  });
+  
   // Handle window resize
-  window.addEventListener('resize', () => fitAddon.fit());
+  window.addEventListener('resize', () => {
+    fitAddon.fit();
+    // Update PTY size when terminal is resized
+    socket.emit('resize', {
+      sessionId: currentSession,
+      cols: terminal.cols,
+      rows: terminal.rows
+    });
+  });
   
   // Store terminal reference
   currentTerminal = terminal;
@@ -181,14 +194,8 @@ async function createTerminalView(sessionId) {
     terminal.write('\x1b[31mFailed to load session output\x1b[0m\r\n');
   }
   
-  // Setup command input
-  const input = document.getElementById('command-input');
-  input.focus();
-  input.addEventListener('keypress', (e) => {
-    if (e.key === 'Enter') {
-      sendCommand();
-    }
-  });
+  // Focus terminal for immediate keyboard input
+  terminal.focus();
 }
 
 // Socket.IO event listeners
@@ -246,23 +253,8 @@ function setupSocketListeners() {
   });
 }
 
-// Send command to session
-function sendCommand() {
-  const input = document.getElementById('command-input');
-  const command = input.value.trim();
-  
-  if (!command || !currentSession) return;
-  
-  // Send command
-  socket.emit('exec', {
-    sessionId: currentSession,
-    command: command
-  });
-  
-  // Clear input
-  input.value = '';
-  input.focus();
-}
+// Note: Command input has been removed in favor of direct terminal input
+// Users can type directly into the terminal for a more natural experience
 
 // Send signal to session
 function sendSignal(signal) {
