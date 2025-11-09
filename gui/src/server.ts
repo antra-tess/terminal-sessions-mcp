@@ -113,10 +113,21 @@ export class WebGUIServer {
         }
       });
 
-      // Handle input
+      // Handle input (from keyboard or command box)
       socket.on('input', async (data: { sessionId: string; input: string }) => {
         try {
-          await this.sessionClient.sendInput(data.sessionId, data.input);
+          // Don't append newline - xterm.js sends raw key data
+          await this.sessionClient.sendInput(data.sessionId, data.input, false);
+        } catch (error: any) {
+          socket.emit('error', { message: error.message });
+        }
+      });
+
+      // Handle signal
+      socket.on('signal', async (data: { sessionId: string; signal: string }) => {
+        try {
+          await this.sessionClient.sendSignal(data.sessionId, data.signal);
+          socket.emit('signal-sent', { sessionId: data.sessionId, signal: data.signal });
         } catch (error: any) {
           socket.emit('error', { message: error.message });
         }

@@ -92,7 +92,11 @@ async function createTerminalView(sessionId) {
     <div class="terminal-header">
       <div class="terminal-title">Session: ${sessionId}</div>
       <div class="terminal-actions">
-        <button class="secondary" onclick="takeScreenshot()">📸 Screenshot</button>
+        <div class="signal-buttons">
+          <button class="signal danger" onclick="sendSignal('SIGINT')" title="Ctrl+C">^C</button>
+          <button class="signal" onclick="sendSignal('SIGTSTP')" title="Ctrl+Z">^Z</button>
+          <button class="signal" onclick="sendSignal('SIGTERM')" title="Terminate">TERM</button>
+        </div>
         <button class="secondary" onclick="clearTerminal()">🗑️ Clear</button>
       </div>
     </div>
@@ -100,7 +104,7 @@ async function createTerminalView(sessionId) {
       <div id="terminal"></div>
     </div>
     <div class="input-container">
-      <input type="text" id="command-input" placeholder="Type command and press Enter..." />
+      <input type="text" id="command-input" placeholder="Type command and press Enter, or use terminal directly..." />
       <button onclick="sendCommand()">Send</button>
     </div>
   `;
@@ -150,6 +154,16 @@ async function createTerminalView(sessionId) {
   
   // Store terminal reference
   currentTerminal = terminal;
+  
+  // Enable keyboard input - forward all key presses to the session
+  terminal.onData(data => {
+    if (currentSession) {
+      socket.emit('input', {
+        sessionId: currentSession,
+        input: data
+      });
+    }
+  });
   
   // Load existing output
   try {
@@ -249,26 +263,19 @@ function sendCommand() {
   input.focus();
 }
 
-// Take screenshot from xterm.js
-function takeScreenshot() {
-  if (!currentTerminal) return;
+// Send signal to session
+function sendSignal(signal) {
+  if (!currentSession) return;
   
-  // Create a temporary canvas
-  const terminalElement = currentTerminal.element;
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  
-  // Set canvas size to match terminal
-  const rect = terminalElement.getBoundingClientRect();
-  canvas.width = rect.width;
-  canvas.height = rect.height;
-  
-  // Try to use html2canvas if available, otherwise use a simpler approach
-  // For now, request screenshot from server which has the full buffer
-  socket.emit('screenshot', {
+  socket.emit('signal', {
     sessionId: currentSession,
-    lines: 100
+    signal: signal
   });
+  
+  // Visual feedback
+  if (currentTerminal) {
+    currentTerminal.write(`\r\n\x1b[33m[Signal: ${signal} sent]\x1b[0m\r\n`);
+  }
 }
 
 // Clear terminal display
