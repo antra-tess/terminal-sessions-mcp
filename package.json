@@ -1,12 +1,13 @@
 {
   "name": "terminal-sessions-mcp",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Persistent terminal session management with MCP integration for AI assistants",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
     "terminal-sessions-mcp": "./dist/mcp/mcp-stdio-server.js",
     "session-server": "./dist/server/start-session-server.js",
+    "session-gui": "./dist/gui/src/start-gui.js",
     "session-cli": "./dist/cli/session-cli.js"
   },
   "scripts": {
@@ -14,6 +15,7 @@
     "dev": "tsc --watch",
     "start": "node dist/server/start-session-server.js",
     "start-server": "ts-node src/server/start-session-server.ts",
+    "start-gui": "ts-node gui/src/start-gui.ts",
     "mcp-server": "ts-node src/mcp/mcp-stdio-server.ts",
     "cli": "ts-node cli/session-cli.ts",
     "prepublishOnly": "npm run build"
@@ -36,13 +38,19 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.11.2",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-web-links": "^0.11.0",
+    "@xterm/xterm": "^5.5.0",
     "ansi-to-html": "^0.7.2",
+    "express": "^5.1.0",
     "node-pty": "^1.0.0",
     "puppeteer": "^24.29.1",
+    "socket.io": "^4.8.1",
     "strip-ansi": "^7.1.0",
     "ws": "^8.16.0"
   },
   "devDependencies": {
+    "@types/express": "^5.0.5",
     "@types/node": "^20.0.0",
     "@types/ws": "^8.5.10",
     "ts-node": "^10.0.0",

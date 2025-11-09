@@ -75,20 +75,31 @@ export class RobustSessionClient extends EventEmitter {
     
     this.ws.on('message', (data: Buffer) => {
       try {
-        const response = JSON.parse(data.toString());
+        const payload = JSON.parse(data.toString());
         if (process.env.MCP_DEBUG) {
-          console.error('[RobustClient] Received response:', response);
+          console.error('[RobustClient] Received message:', payload);
         }
         
-        const pending = this.pending.get(response.id);
+        // Handle event messages (subscriptions)
+        if (payload && payload.type === 'event') {
+          this.emit('event', payload);
+          this.emit(payload.event, payload);
+          if (payload.sessionId) {
+            this.emit(`${payload.event}:${payload.sessionId}`, payload);
+          }
+          return;
+        }
+        
+        // Handle response messages (request/response)
+        const pending = this.pending.get(payload.id);
         if (pending) {
           clearTimeout(pending.timeout);
-          this.pending.delete(response.id);
+          this.pending.delete(payload.id);
           
-          if (response.error) {
-            pending.reject(new Error(response.error));
+          if (payload.error) {
+            pending.reject(new Error(payload.error));
           } else {
-            pending.resolve(response.result);
+            pending.resolve(payload.result);
           }
         }
       } catch (error) {

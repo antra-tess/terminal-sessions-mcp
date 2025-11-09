@@ -1,5 +1,31 @@
 # Changelog
 
+## v1.2.0 - 2024-11-09
+
+### Added
+
+- **Web GUI** 🎨 - Beautiful web interface for terminal session management
+  - xterm.js-based terminal rendering with full TUI support
+  - Dashboard showing all active sessions
+  - Live Socket.IO updates
+  - Interactive command input
+  - Screenshot button to capture rendered terminal
+  - GitHub dark theme UI
+  - Accessible at http://localhost:3200
+- **Proper TUI Support** - All terminal control sequences work correctly:
+  - Cursor positioning (`\033[row;colH`)
+  - Screen clearing (`\033[2J`)
+  - All ANSI colors and formatting
+  - Box drawing characters
+  - Progress bars with proper positioning
+- **Live Event Streaming** - RobustSessionClient now emits WebSocket events
+- Binary command: `session-gui` for starting web interface
+
+### Fixed
+
+- Screenshots now properly render TUI control sequences (via web GUI's xterm.js)
+- Event forwarding from session server → GUI server → browser clients
+
 ## v1.1.0 - 2024-11-09
 
 ### Added

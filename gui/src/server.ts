@@ -1,0 +1,174 @@
+/**
+ * Web GUI Server for Terminal Sessions
+ * 
+ * Provides a web interface to view and interact with terminal sessions
+ */
+
+import express from 'express';
+import { createServer } from 'http';
+import { Server as SocketIOServer } from 'socket.io';
+import path from 'path';
+import { RobustSessionClient } from '../../src/client/websocket-client';
+
+const GUI_PORT = parseInt(process.env.GUI_PORT || '3200');
+const SESSION_SERVER_URL = process.env.SESSION_SERVER_URL || 'ws://localhost:3100';
+
+export class WebGUIServer {
+  private app: express.Application;
+  private httpServer: any;
+  private io: SocketIOServer;
+  private sessionClient: RobustSessionClient;
+
+  constructor(port: number = GUI_PORT) {
+    this.app = express();
+    this.httpServer = createServer(this.app);
+    this.io = new SocketIOServer(this.httpServer, {
+      cors: {
+        origin: '*',
+        methods: ['GET', 'POST']
+      }
+    });
+
+    // Connect to session server
+    this.sessionClient = new RobustSessionClient(SESSION_SERVER_URL);
+
+    this.setupRoutes();
+    this.setupSocketIO();
+
+    this.httpServer.listen(port, () => {
+      console.log(`
+╔═══════════════════════════════════════════╗
+║   Terminal Sessions Web GUI               ║
+║                                           ║
+║   http://localhost:${port}                    ║
+║                                           ║
+║   View and interact with terminal         ║
+║   sessions through your browser           ║
+╚═══════════════════════════════════════════╝
+      `);
+    });
+  }
+
+  private setupRoutes(): void {
+    // Serve static files from source directory
+    const publicDir = path.join(__dirname, '../../../gui/public');
+    this.app.use(express.static(publicDir));
+
+    // API endpoints
+    this.app.get('/api/sessions', async (req, res) => {
+      try {
+        const sessions = await this.sessionClient.listSessions();
+        res.json(sessions);
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    this.app.get('/api/sessions/:id/output', async (req, res) => {
+      try {
+        const lines = parseInt(req.query.lines as string) || 100;
+        const output = await this.sessionClient.getOutput(req.params.id, lines);
+        res.json({ output });
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Main page
+    this.app.get('/', (req, res) => {
+      const indexPath = path.join(__dirname, '../../../gui/public/index.html');
+      res.sendFile(indexPath);
+    });
+  }
+
+  private setupSocketIO(): void {
+    this.io.on('connection', (socket) => {
+      console.log('[WebGUI] Client connected:', socket.id);
+
+      // Handle session subscription
+      socket.on('subscribe', async (sessionId: string) => {
+        console.log('[WebGUI] Client subscribing to:', sessionId);
+        
+        // Join socket room for this session
+        socket.join(`session:${sessionId}`);
+        
+        // Subscribe to session events from the WebSocket session server
+        try {
+          await this.sessionClient.request('session.subscribe', {
+            sessionId,
+            replay: 0  // Don't replay - we already loaded history via API
+          });
+        } catch (error) {
+          console.error('[WebGUI] Failed to subscribe to session events:', error);
+        }
+      });
+
+      // Handle command execution
+      socket.on('exec', async (data: { sessionId: string; command: string }) => {
+        try {
+          const result = await this.sessionClient.exec(data.sessionId, data.command);
+          socket.emit('exec-result', result);
+        } catch (error: any) {
+          socket.emit('error', { message: error.message });
+        }
+      });
+
+      // Handle input
+      socket.on('input', async (data: { sessionId: string; input: string }) => {
+        try {
+          await this.sessionClient.sendInput(data.sessionId, data.input);
+        } catch (error: any) {
+          socket.emit('error', { message: error.message });
+        }
+      });
+
+      // Handle screenshot request
+      socket.on('screenshot', async (data: { sessionId: string; lines?: number }) => {
+        try {
+          const result = await this.sessionClient.takeScreenshot(data.sessionId, {
+            lines: data.lines || 50
+          });
+          socket.emit('screenshot-result', result);
+        } catch (error: any) {
+          socket.emit('error', { message: error.message });
+        }
+      });
+
+      socket.on('disconnect', () => {
+        console.log('[WebGUI] Client disconnected:', socket.id);
+      });
+    });
+
+    // Forward session events to connected clients
+    this.sessionClient.on('event', (envelope: any) => {
+      const event = envelope.event;
+      const payload = envelope.payload;
+      
+      if (event === 'session:output') {
+        this.io.to(`session:${envelope.sessionId}`).emit('output', payload);
+      } else if (event === 'session:created') {
+        this.io.emit('session:created', payload);
+      } else if (event === 'session:exit') {
+        this.io.emit('session:exit', payload);
+      }
+    });
+  }
+
+  async stop(): Promise<void> {
+    this.sessionClient.close();
+    this.io.close();
+    this.httpServer.close();
+  }
+}
+
+// Start server if run directly
+if (require.main === module) {
+  const server = new WebGUIServer();
+
+  process.on('SIGINT', async () => {
+    console.log('\nShutting down...');
+    await server.stop();
+    process.exit(0);
+  });
+}
+
