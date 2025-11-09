@@ -186,6 +186,10 @@ export class SessionAPI {
           result = { success: true };
           break;
           
+        case 'session.screenshot':
+          result = await this.server.takeScreenshot(params.sessionId, params);
+          break;
+          
         default:
           throw new Error(`Unknown method: ${method}`);
       }

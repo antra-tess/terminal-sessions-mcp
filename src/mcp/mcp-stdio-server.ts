@@ -21,7 +21,8 @@ let mcp: ConnectomeTestingMCP | null = null;
 
 function getMCP() {
   if (!mcp) {
-    mcp = new ConnectomeTestingMCP('ws://localhost:3100');
+    const port = process.env.SESSION_SERVER_PORT || '3100';
+    mcp = new ConnectomeTestingMCP(`ws://localhost:${port}`);
   }
   return mcp;
 }
@@ -124,6 +125,20 @@ const TOOLS = {
       },
       required: ['session', 'pattern']
     }
+  },
+  takeScreenshot: {
+    description: 'Take a screenshot of the terminal session (useful for visually rich TUIs, ANSI art, progress bars)',
+    parameters: {
+      type: 'object',
+      properties: {
+        session: { type: 'string', description: 'Session to screenshot' },
+        lines: { type: 'number', description: 'Number of recent lines to capture (default: 50)' },
+        outputPath: { type: 'string', description: 'Optional file path to save screenshot (returns base64 if omitted)' },
+        width: { type: 'number', description: 'Screenshot width in pixels (default: 1200)' },
+        height: { type: 'number', description: 'Screenshot height in pixels (default: 800)' }
+      },
+      required: ['session']
+    }
   }
 };
 
@@ -134,18 +149,36 @@ function sendResponse(id: string | number, result?: any, error?: any) {
     id,
     ...(error ? { error } : { result })
   };
-  console.log(JSON.stringify(response));
+  const output = JSON.stringify(response);
+  
+  // Debug: log what we're sending
+  if (process.env.MCP_DEBUG) {
+    console.error('[SEND]', output);
+  }
+  
+  console.log(output);
 }
 
 // Handle incoming messages
 rl.on('line', async (line) => {
+  let messageId: string | number | undefined;
+  
   try {
     const message = JSON.parse(line);
     const { id, method, params } = message;
+    messageId = id;
     
     // Log to stderr for debugging
     if (process.env.MCP_DEBUG) {
-      console.error('Received:', method, params);
+      console.error('Received:', method, 'id:', id, 'params:', params);
+    }
+    
+    // Handle notifications (messages without id) - these don't need responses
+    if (id === undefined || id === null) {
+      if (process.env.MCP_DEBUG) {
+        console.error('Ignoring notification:', method);
+      }
+      return;
     }
     
     switch (method) {
@@ -207,6 +240,9 @@ rl.on('line', async (line) => {
             case 'searchLogs':
               result = await mcpInstance.searchLogs(args);
               break;
+            case 'takeScreenshot':
+              result = await mcpInstance.takeScreenshot(args);
+              break;
             default:
               throw new Error(`Unknown tool: ${name}`);
           }
@@ -233,6 +269,13 @@ rl.on('line', async (line) => {
     }
   } catch (err: any) {
     console.error('Error processing message:', err);
+    // Send proper JSON-RPC error response if we have an id
+    if (messageId !== undefined) {
+      sendResponse(messageId, null, {
+        code: -32603,
+        message: `Internal error: ${err.message}`
+      });
+    }
   }
 });
 

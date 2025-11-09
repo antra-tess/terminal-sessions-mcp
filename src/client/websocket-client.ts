@@ -262,6 +262,15 @@ export class RobustSessionClient extends EventEmitter {
     return this.request('session.killAll', { graceful });
   }
   
+  async takeScreenshot(sessionId: string, options?: {
+    lines?: number;
+    outputPath?: string;
+    width?: number;
+    height?: number;
+  }) {
+    return this.request('session.screenshot', { sessionId, ...options });
+  }
+  
   close() {
     // Cancel reconnection
     if (this.reconnectTimer) {

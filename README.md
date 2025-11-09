@@ -2,13 +2,14 @@
 
 **Persistent terminal session management with MCP integration for AI assistants**
 
-This package provides a robust solution for managing persistent terminal sessions with intelligent startup detection, log search, and seamless integration with AI assistants through the Model Context Protocol (MCP).
+This package provides a robust solution for managing persistent terminal sessions with intelligent startup detection, log search, **terminal screenshots**, and seamless integration with AI assistants through the Model Context Protocol (MCP).
 
 ## Features
 
 ✅ **Persistent Sessions** - Commands like `cd` and `export` persist across AI responses  
 ✅ **Smart Service Starting** - Detects when services are ready or have errors  
 ✅ **Log Search** - Find patterns in output with context  
+✅ **Terminal Screenshots** - Capture visually rich terminal output (TUIs, ANSI art, progress bars) 📸  
 ✅ **Multi-Service Management** - Track multiple services by name  
 ✅ **MCP Integration** - Ready for AI assistant integration (Cursor, Claude Desktop, etc.)  
 ✅ **WebSocket API** - Real-time bidirectional communication  
@@ -46,6 +47,12 @@ console.log(result.output);
 
 // Search logs
 const matches = await client.searchLogs('my-session', 'error|warning', 5);
+
+// Take a screenshot (great for TUIs!)
+const screenshot = await client.takeScreenshot('my-session', {
+  lines: 50,
+  outputPath: './terminal.png'
+});
 ```
 
 ### 3. Use with MCP (AI Assistants)
@@ -72,6 +79,30 @@ Then start the session server separately:
 SESSION_SERVER_PORT=3100 npx session-server
 ```
 
+## Terminal Screenshots 📸
+
+Perfect for debugging visually rich terminal applications:
+
+```typescript
+// Capture a TUI, progress bar, or ANSI art
+const result = await client.takeScreenshot('my-session', {
+  lines: 50,           // How many lines to capture
+  outputPath: './screenshot.png',  // Save to file
+  width: 1200,         // Image width
+  height: 800          // Image height
+});
+
+// Or get base64 (omit outputPath)
+const { base64 } = await client.takeScreenshot('my-session');
+```
+
+**Use cases:**
+- 📊 Debugging progress bars and spinners
+- 🎨 Capturing ANSI art and colors
+- 🖥️  Visual regression testing of CLI tools
+- 📝 Documenting terminal applications
+- 🔍 Sharing colorized logs with proper formatting
+
 ## Architecture
 
 ```
@@ -84,7 +115,7 @@ SESSION_SERVER_PORT=3100 npx session-server
 └─────────────┘                    │    Sessions  │
                                    │  - Output    │
 ┌─────────────┐                    │    Buffers   │
-│ Your Code   │◄──────────────────►│              │
+│ Your Code   │◄──────────────────►│  - Screenshot│
 └─────────────┘                    └──────────────┘
 ```
 
@@ -99,6 +130,7 @@ SESSION_SERVER_PORT=3100 npx session-server
 - `session.list` - List all active sessions
 - `session.kill` - Terminate a session
 - `session.killAll` - Terminate all sessions
+- `session.screenshot` - Take a visual screenshot of terminal output 📸
 
 ### Service Management
 
@@ -154,11 +186,15 @@ Enable AI assistants to manage development services, run tests, and interact wit
 
 Start and monitor multiple services simultaneously, with intelligent startup detection and log search.
 
-### 3. Interactive Debugging
+### 3. Visual Terminal Debugging
+
+Capture screenshots of TUIs, progress bars, and ANSI art for debugging or documentation.
+
+### 4. Interactive Debugging
 
 AI assistants can interact with running processes, send input, and observe output in real-time.
 
-### 4. Collaborative Development
+### 5. Collaborative Development
 
 Share terminal sessions between multiple agents or humans for coordinated work.
 
@@ -180,6 +216,9 @@ npm run start-server
 
 # Run CLI
 npm run cli -- list
+
+# Run screenshot demo
+npx ts-node examples/screenshot-demo.ts
 ```
 
 ## License
@@ -193,4 +232,3 @@ Developed by [Anima Labs](https://github.com/anima-labs) as part of the Connecto
 ## Contributing
 
 Contributions welcome! Please open an issue or PR on GitHub.
-

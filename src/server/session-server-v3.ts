@@ -12,6 +12,8 @@
 import * as pty from 'node-pty';
 import { IPty } from 'node-pty';
 import { EventEmitter } from 'events';
+import * as fs from 'fs';
+import * as path from 'path';
 
 interface SessionInfo {
   id: string;
@@ -588,6 +590,123 @@ export class PersistentSessionServer extends EventEmitter {
   async getCurrentDirectory(sessionId: string): Promise<string> {
     const result = await this.execCommand(sessionId, 'pwd');
     return result.output.trim();
+  }
+
+  /**
+   * Take a screenshot of the terminal session
+   */
+  async takeScreenshot(sessionId: string, options?: {
+    lines?: number;
+    outputPath?: string;
+    width?: number;
+    height?: number;
+  }): Promise<{ success: boolean; path?: string; base64?: string; error?: string }> {
+    try {
+      const session = this.sessions.get(sessionId);
+      if (!session) {
+        throw new Error(`Session ${sessionId} not found`);
+      }
+
+      // Get recent output
+      const lines = options?.lines || 50;
+      const output = session.logs.slice(-lines).join('\n');
+
+      // Convert ANSI to HTML
+      const AnsiToHtml = require('ansi-to-html');
+      const convert = new AnsiToHtml({
+        fg: '#e0e0e0',
+        bg: '#1e1e1e',
+        newline: true,
+        escapeXML: true
+      });
+      
+      const htmlContent = convert.toHtml(output);
+
+      // Create full HTML page with terminal styling
+      const html = `
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body {
+      margin: 0;
+      padding: 20px;
+      background: #1e1e1e;
+      font-family: 'Courier New', Consolas, Monaco, monospace;
+      font-size: 14px;
+      line-height: 1.5;
+      color: #e0e0e0;
+    }
+    .terminal {
+      background: #1e1e1e;
+      border: 1px solid #333;
+      border-radius: 6px;
+      padding: 20px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+    .terminal-header {
+      background: #2d2d2d;
+      padding: 10px 20px;
+      border-radius: 6px 6px 0 0;
+      margin: -20px -20px 20px -20px;
+      color: #888;
+      font-size: 12px;
+      border-bottom: 1px solid #333;
+    }
+  </style>
+</head>
+<body>
+  <div class="terminal">
+    <div class="terminal-header">Session: ${sessionId} | Lines: ${lines}</div>
+    ${htmlContent}
+  </div>
+</body>
+</html>`;
+
+      // Use puppeteer to render and screenshot
+      const puppeteer = require('puppeteer');
+      const browser = await puppeteer.launch({ 
+        headless: true,
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+      });
+      
+      try {
+        const page = await browser.newPage();
+        
+        // Set viewport size
+        await page.setViewport({
+          width: options?.width || 1200,
+          height: options?.height || 800
+        });
+        
+        await page.setContent(html);
+        
+        // Take screenshot
+        const screenshotBuffer = await page.screenshot({
+          type: 'png',
+          fullPage: true
+        });
+        
+        await browser.close();
+
+        // Save or return base64
+        if (options?.outputPath) {
+          const fullPath = path.resolve(options.outputPath);
+          await fs.promises.writeFile(fullPath, screenshotBuffer);
+          return { success: true, path: fullPath };
+        } else {
+          const base64 = screenshotBuffer.toString('base64');
+          return { success: true, base64 };
+        }
+      } finally {
+        await browser.close().catch(() => {});
+      }
+    } catch (error: any) {
+      return { success: false, error: error.message };
+    }
   }
 
   // Helper methods

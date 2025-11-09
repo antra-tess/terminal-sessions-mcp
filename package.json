@@ -36,9 +36,11 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.11.2",
+    "ansi-to-html": "^0.7.2",
     "node-pty": "^1.0.0",
-    "ws": "^8.16.0",
-    "strip-ansi": "^7.1.0"
+    "puppeteer": "^24.29.1",
+    "strip-ansi": "^7.1.0",
+    "ws": "^8.16.0"
   },
   "devDependencies": {
     "@types/node": "^20.0.0",
@@ -50,4 +52,3 @@
     "node": ">=18.0.0"
   }
 }
-
