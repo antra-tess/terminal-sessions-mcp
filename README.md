@@ -6,20 +6,24 @@
 
 ## Why This Matters
 
-Most terminal tools for AI assistants execute commands in isolated, short-lived shells. This creates fundamental limitations:
+While many AI tools offer basic command execution, Terminal Sessions MCP provides unique capabilities:
 
-- **No state persistence** - Every command starts fresh; `cd` and `export` don't persist
-- **No interactivity** - Can't handle password prompts, confirmations, or interactive tools
-- **No process control** - Can't send signals (Ctrl+C), can't gracefully stop long-running processes
-- **Sessions die with restarts** - Closing Cursor/Claude Desktop kills all running processes
-- **No context** - Can't search through command history or previous output
+**What makes this different:**
+- **Sessions survive IDE restarts** - Unlike typical tools, your sessions persist even when you close Cursor/Claude Desktop
+- **Background tasks with log access** - Run dev servers, builds, or tests in background while retaining full access to their output
+- **True interactivity** - Send input to prompts, handle confirmations, respond to interactive tools
+- **Process control** - Send signals (Ctrl+C, Ctrl+Z) to gracefully manage long-running processes
+- **Stateful environment** - `cd`, `export`, and environment changes persist across commands
+- **Visual debugging** - Take screenshots of terminal output to debug TUI applications
+- **Context search** - Search through command history and output with regex
 
-**Terminal Sessions MCP solves all of this.** Your AI assistant gets true persistent sessions that survive restarts, support interactive workflows, and maintain full context.
+Your AI assistant can now run servers in the background while working on other tasks, maintain persistent development environments, handle interactive workflows, and even build terminal UI applications with visual feedback.
 
 ## MCP Features
 
 ✅ **Truly Persistent Sessions** - Sessions survive Cursor/IDE restarts, keeping all state  
 ✅ **Interactive Workflows** - Handle password prompts, confirmations, and interactive tools  
+✅ **Build & Debug TUIs** - Develop terminal UI apps with visual feedback via screenshots  
 ✅ **Process Control** - Send signals (SIGINT, SIGTERM, SIGTSTP) to running processes  
 ✅ **Stateful Shell** - `cd`, `export`, and other state changes persist across AI responses  
 ✅ **Log Search** - Search through command history and output with regex and context  
