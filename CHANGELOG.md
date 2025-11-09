@@ -15,6 +15,12 @@
 - New MCP tool: `takeScreenshot`
 - Dependencies: `ansi-to-html`, `puppeteer`
 
+### Changed
+
+- **Infinite reconnection** - RobustSessionClient now retries indefinitely instead of giving up after 5 attempts
+- Reconnection delay caps at 5 seconds (was 30 seconds)
+- Handles server restarts gracefully without manual intervention
+
 ## v1.0.0 - 2024-11-09
 
 ### Initial Release

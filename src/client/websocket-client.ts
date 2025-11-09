@@ -20,8 +20,8 @@ export class RobustSessionClient extends EventEmitter {
   private state: ConnectionState = ConnectionState.DISCONNECTED;
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
   private reconnectDelay = 1000; // Start with 1 second
+  private maxReconnectDelay = 5000; // Cap at 5 seconds
   private requestTimeout = 10000; // 10 second timeout for requests
   
   constructor(url: string = 'ws://localhost:3100') {
@@ -55,7 +55,7 @@ export class RobustSessionClient extends EventEmitter {
       }
       this.state = ConnectionState.CONNECTED;
       this.reconnectAttempts = 0;
-      this.reconnectDelay = 1000;
+      this.reconnectDelay = 1000; // Reset to 1 second on successful connection
       this.emit('connected');
     });
     
@@ -127,14 +127,7 @@ export class RobustSessionClient extends EventEmitter {
       clearTimeout(this.reconnectTimer);
     }
     
-    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
-      if (process.env.MCP_DEBUG) {
-        console.error('[RobustClient] Max reconnection attempts reached');
-      }
-      this.emit('max_reconnect_failed');
-      return;
-    }
-    
+    // Never give up! Keep trying indefinitely
     this.state = ConnectionState.RECONNECTING;
     this.reconnectAttempts++;
     
@@ -146,8 +139,8 @@ export class RobustSessionClient extends EventEmitter {
       this.connect();
     }, this.reconnectDelay);
     
-    // Exponential backoff with max delay of 30 seconds
-    this.reconnectDelay = Math.min(this.reconnectDelay * 2, 30000);
+    // Exponential backoff but cap at maxReconnectDelay (5 seconds)
+    this.reconnectDelay = Math.min(this.reconnectDelay * 2, this.maxReconnectDelay);
   }
   
   async request(method: string, params?: any): Promise<any> {

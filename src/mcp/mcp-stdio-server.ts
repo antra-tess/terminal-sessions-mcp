@@ -247,12 +247,34 @@ rl.on('line', async (line) => {
               throw new Error(`Unknown tool: ${name}`);
           }
           
-          sendResponse(id, {
-            content: [{
-              type: 'text',
-              text: typeof result === 'string' ? result : JSON.stringify(result, null, 2)
-            }]
-          });
+          // Special handling for screenshot - return image content
+          if (name === 'takeScreenshot' && 
+              typeof result === 'object' && 
+              result !== null && 
+              'success' in result && 
+              result.success && 
+              'base64' in result) {
+            sendResponse(id, {
+              content: [
+                {
+                  type: 'image',
+                  data: result.base64,
+                  mimeType: 'image/png'
+                },
+                {
+                  type: 'text',
+                  text: 'path' in result && result.path ? `Saved to: ${result.path}` : 'Screenshot captured'
+                }
+              ]
+            });
+          } else {
+            sendResponse(id, {
+              content: [{
+                type: 'text',
+                text: typeof result === 'string' ? result : JSON.stringify(result, null, 2)
+              }]
+            });
+          }
         } catch (err: any) {
           sendResponse(id, null, {
             code: -32000,

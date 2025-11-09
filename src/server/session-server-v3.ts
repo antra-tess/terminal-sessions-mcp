@@ -692,13 +692,14 @@ export class PersistentSessionServer extends EventEmitter {
         
         await browser.close();
 
-        // Save or return base64
+        // Always return base64 for MCP, optionally save to file too
+        const base64 = screenshotBuffer.toString('base64');
+        
         if (options?.outputPath) {
           const fullPath = path.resolve(options.outputPath);
           await fs.promises.writeFile(fullPath, screenshotBuffer);
-          return { success: true, path: fullPath };
+          return { success: true, base64, path: fullPath };
         } else {
-          const base64 = screenshotBuffer.toString('base64');
           return { success: true, base64 };
         }
       } finally {
