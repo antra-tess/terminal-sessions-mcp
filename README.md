@@ -8,8 +8,11 @@ This package provides a complete solution for managing persistent terminal sessi
 
 ## Features
 
-✅ **Web GUI** - Beautiful dashboard to view and interact with all sessions  
-✅ **Real TUI Support** - Proper rendering of terminal control sequences with xterm.js  
+✅ **Web GUI** - Beautiful dashboard with xterm.js terminal emulator  
+✅ **Mouse Support** - Full mouse interaction in TUI apps (Midnight Commander, htop, etc.)  
+✅ **Real TUI Support** - Proper rendering of terminal control sequences and colors  
+✅ **Dynamic Resize** - Automatic terminal resizing with proper coordinate mapping  
+✅ **Direct Input** - Type naturally into the terminal with full keyboard support  
 ✅ **Persistent Sessions** - Commands like `cd` and `export` persist across AI responses  
 ✅ **Smart Service Starting** - Detects when services are ready or have errors  
 ✅ **Log Search** - Find patterns in output with context  
@@ -43,13 +46,14 @@ HEADLESS=true npx session-server
 ```
 
 The web GUI provides:
-- 📊 Dashboard showing all active sessions
-- 🖥️ xterm.js terminal with proper TUI rendering and mouse support
-- 🖱️ Full mouse support for TUI apps (mc, htop, etc.)
-- 💬 Direct terminal input (type naturally!)
-- 📸 Screenshot button to capture terminal state
-- 🎨 Beautiful dark theme
-- 🔄 Live updates in real-time
+- 📊 Dashboard showing all active sessions with live status
+- 🖥️ Full xterm.js terminal emulator with 256-color support
+- 🖱️ Complete mouse support (clicks, drags, scrolling in TUI apps)
+- ⌨️ Direct keyboard input with proper key code forwarding
+- 📐 Automatic resize handling for perfect coordinate mapping
+- 🎨 Beautiful GitHub-inspired dark theme
+- 🔄 Real-time output streaming
+- ⚡ Signal controls (Ctrl+C, Ctrl+Z, SIGTERM)
 
 ### 3. Configure MCP for AI Assistants
 

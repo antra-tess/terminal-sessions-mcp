@@ -172,6 +172,10 @@ async function createTerminalView(sessionId) {
   // Enable keyboard input - forward all key presses to the session
   terminal.onData(data => {
     if (currentSession) {
+      // Debug: log to see if mouse events are being captured
+      if (data.charCodeAt(0) === 27) {  // ESC character - mouse events start with ESC
+        console.log('[Mouse/Special] Data:', data.split('').map(c => c.charCodeAt(0)));
+      }
       socket.emit('input', {
         sessionId: currentSession,
         input: data

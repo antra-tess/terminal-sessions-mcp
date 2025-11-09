@@ -143,7 +143,7 @@ export class PersistentSessionServer extends EventEmitter {
 
     // Create PTY instance
     const ptyProcess = pty.spawn(shell, shellArgs, {
-      name: 'xterm-color',
+      name: 'xterm-256color',  // Modern terminal with full mouse tracking support
       cwd,
       env,
       cols: 120,
@@ -243,7 +243,7 @@ export class PersistentSessionServer extends EventEmitter {
     
     if (!isWindows) {
       // Minimal setup - just ensure a clean environment
-      session.shell.write('export TERM=xterm-color\n');
+      session.shell.write('export TERM=xterm-256color\n');
       await this.sleep(200); // Give shell time to initialize
       
       // Clear any initial output/warnings
