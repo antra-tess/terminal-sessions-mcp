@@ -131,7 +131,11 @@ export class SessionAPI {
           break;
 
         case 'session.create':
-          result = await this.server.createSession(params);
+          result = await this.server.createSession(params.id, {
+            cwd: params.cwd,
+            env: params.env,
+            shell: params.shell
+          });
           break;
           
         case 'session.exec':

@@ -64,6 +64,21 @@ export class WebGUIServer {
       }
     });
 
+    // Create new session
+    this.app.use(express.json());
+    this.app.post('/api/sessions', async (req, res) => {
+      try {
+        const { id, cwd, env } = req.body;
+        if (!id) {
+          return res.status(400).json({ error: 'Session ID required' });
+        }
+        const sessionId = await this.sessionClient.createSession({ id, cwd, env });
+        res.json({ sessionId });
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
     this.app.get('/api/sessions/:id/output', async (req, res) => {
       try {
         const lines = parseInt(req.query.lines as string) || 100;
@@ -140,6 +155,16 @@ export class WebGUIServer {
             lines: data.lines || 50
           });
           socket.emit('screenshot-result', result);
+        } catch (error: any) {
+          socket.emit('error', { message: error.message });
+        }
+      });
+
+      // Handle session kill
+      socket.on('kill', async (data: { sessionId: string; graceful?: boolean }) => {
+        try {
+          await this.sessionClient.killSession(data.sessionId, data.graceful !== false);
+          socket.emit('kill-success', { sessionId: data.sessionId });
         } catch (error: any) {
           socket.emit('error', { message: error.message });
         }

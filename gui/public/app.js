@@ -98,6 +98,7 @@ async function createTerminalView(sessionId) {
           <button class="signal" onclick="sendSignal('SIGTERM')" title="Terminate">TERM</button>
         </div>
         <button class="secondary" onclick="clearTerminal()">🗑️ Clear</button>
+        <button class="secondary danger" onclick="killCurrentSession()">💀 Kill Session</button>
       </div>
     </div>
     <div id="terminal-container">
@@ -283,5 +284,85 @@ function clearTerminal() {
   if (currentTerminal) {
     currentTerminal.clear();
   }
+}
+
+// Toggle new session form
+function toggleNewSessionForm() {
+  const form = document.getElementById('new-session-form');
+  form.classList.toggle('visible');
+  if (form.classList.contains('visible')) {
+    document.getElementById('new-session-name').focus();
+  }
+}
+
+// Create new session
+async function createNewSession() {
+  const nameInput = document.getElementById('new-session-name');
+  const cwdInput = document.getElementById('new-session-cwd');
+  
+  const name = nameInput.value.trim();
+  if (!name) {
+    alert('Please enter a session name');
+    return;
+  }
+  
+  const cwd = cwdInput.value.trim() || undefined;
+  
+  try {
+    const response = await fetch('/api/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: name, cwd })
+    });
+    
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to create session');
+    }
+    
+    // Clear form
+    nameInput.value = '';
+    cwdInput.value = '';
+    toggleNewSessionForm();
+    
+    // Refresh sessions list
+    await loadSessions();
+    
+    // Auto-select the new session
+    setTimeout(() => selectSession(name), 500);
+  } catch (error) {
+    alert('Error creating session: ' + error.message);
+  }
+}
+
+// Kill current session
+function killCurrentSession() {
+  if (!currentSession) return;
+  
+  if (!confirm(`Kill session "${currentSession}"? This will terminate all running processes.`)) {
+    return;
+  }
+  
+  socket.emit('kill', {
+    sessionId: currentSession,
+    graceful: true
+  });
+  
+  // Clear UI
+  currentTerminal?.dispose();
+  currentTerminal = null;
+  currentSession = null;
+  
+  document.getElementById('content').innerHTML = `
+    <div class="empty-state">
+      <svg fill="currentColor" viewBox="0 0 16 16">
+        <path d="M0 2a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V2zm9.5 10.5H2V4h12v8.5H9.5z"/>
+      </svg>
+      <p>Session killed</p>
+    </div>
+  `;
+  
+  // Refresh sessions list
+  setTimeout(loadSessions, 500);
 }
 
