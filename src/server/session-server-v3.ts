@@ -615,13 +615,15 @@ export class PersistentSessionServer extends EventEmitter {
   }
 
   /**
-   * Take a screenshot of the terminal session
+   * Take a screenshot of the terminal session via xterm.js GUI
+   * This properly captures TUIs like htop, vim, etc.
    */
   async takeScreenshot(sessionId: string, options?: {
     lines?: number;
     outputPath?: string;
     width?: number;
     height?: number;
+    guiPort?: number;
   }): Promise<{ success: boolean; path?: string; base64?: string; error?: string }> {
     try {
       const session = this.sessions.get(sessionId);
@@ -629,66 +631,11 @@ export class PersistentSessionServer extends EventEmitter {
         throw new Error(`Session ${sessionId} not found`);
       }
 
-      // Get recent output
-      const lines = options?.lines || 50;
-      const output = session.logs.slice(-lines).join('\n');
+      const guiPort = options?.guiPort || 3200;
+      const width = options?.width || 1400;
+      const height = options?.height || 900;
 
-      // Convert ANSI to HTML
-      const AnsiToHtml = require('ansi-to-html');
-      const convert = new AnsiToHtml({
-        fg: '#e0e0e0',
-        bg: '#1e1e1e',
-        newline: true,
-        escapeXML: true
-      });
-      
-      const htmlContent = convert.toHtml(output);
-
-      // Create full HTML page with terminal styling
-      const html = `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <style>
-    body {
-      margin: 0;
-      padding: 20px;
-      background: #1e1e1e;
-      font-family: 'Courier New', Consolas, Monaco, monospace;
-      font-size: 14px;
-      line-height: 1.5;
-      color: #e0e0e0;
-    }
-    .terminal {
-      background: #1e1e1e;
-      border: 1px solid #333;
-      border-radius: 6px;
-      padding: 20px;
-      overflow: auto;
-      white-space: pre-wrap;
-      word-wrap: break-word;
-    }
-    .terminal-header {
-      background: #2d2d2d;
-      padding: 10px 20px;
-      border-radius: 6px 6px 0 0;
-      margin: -20px -20px 20px -20px;
-      color: #888;
-      font-size: 12px;
-      border-bottom: 1px solid #333;
-    }
-  </style>
-</head>
-<body>
-  <div class="terminal">
-    <div class="terminal-header">Session: ${sessionId} | Lines: ${lines}</div>
-    ${htmlContent}
-  </div>
-</body>
-</html>`;
-
-      // Use puppeteer to render and screenshot
+      // Use puppeteer to navigate to the xterm.js GUI
       const puppeteer = require('puppeteer');
       const browser = await puppeteer.launch({ 
         headless: true,
@@ -700,16 +647,67 @@ export class PersistentSessionServer extends EventEmitter {
         
         // Set viewport size
         await page.setViewport({
-          width: options?.width || 1200,
-          height: options?.height || 800
+          width,
+          height
         });
         
-        await page.setContent(html);
+        // Navigate to the GUI
+        const guiUrl = `http://localhost:${guiPort}`;
+        await page.goto(guiUrl, { waitUntil: 'networkidle0', timeout: 10000 });
         
-        // Take screenshot
-        const screenshotBuffer = await page.screenshot({
-          type: 'png',
-          fullPage: true
+        // Wait for the session list to load
+        await page.waitForSelector('.session-item', { timeout: 5000 });
+        
+        // Find and click the session - use $$eval to avoid DOM type issues
+        const sessionClicked = await page.$$eval(
+          '.session-item',
+          (items: any[], targetId: string) => {
+            for (const item of items) {
+              const nameEl = item.querySelector('.session-name');
+              if (nameEl && nameEl.textContent === targetId) {
+                (item as any).click();
+                return true;
+              }
+            }
+            return false;
+          },
+          sessionId
+        );
+        
+        if (!sessionClicked) {
+          throw new Error(`Session ${sessionId} not found in GUI`);
+        }
+        
+        // Wait for terminal container to be ready
+        await page.waitForSelector('#terminal', { timeout: 5000 });
+        
+        // Give xterm.js plenty of time to process and render all escape sequences
+        // TUIs like htop send many cursor positioning commands that need time to render
+        await new Promise(resolve => setTimeout(resolve, 3000));
+        
+        // Force xterm.js to refresh if it's available
+        await page.evaluate(() => {
+          try {
+            const w = (globalThis as any);
+            if (w.currentTerminal) {
+              w.currentTerminal.refresh(0, w.currentTerminal.rows - 1);
+            }
+          } catch (e) {
+            // Ignore if terminal refresh fails
+          }
+        });
+        
+        // Final wait after refresh
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Screenshot the terminal canvas container which has the rendered output
+        const terminalElement = await page.$('#terminal');
+        if (!terminalElement) {
+          throw new Error('Terminal element not found in GUI');
+        }
+        
+        const screenshotBuffer = await terminalElement.screenshot({
+          type: 'png'
         });
         
         await browser.close();
@@ -728,7 +726,7 @@ export class PersistentSessionServer extends EventEmitter {
         await browser.close().catch(() => {});
       }
     } catch (error: any) {
-      return { success: false, error: error.message };
+      return { success: false, error: `Failed to screenshot via GUI: ${error.message}` };
     }
   }
 

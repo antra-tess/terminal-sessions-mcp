@@ -169,6 +169,9 @@ async function createTerminalView(sessionId) {
   // Store terminal reference
   currentTerminal = terminal;
   
+  // Expose terminal globally for screenshot functionality
+  window.currentTerminal = terminal;
+  
   // Enable keyboard input - forward all key presses to the session
   terminal.onData(data => {
     if (currentSession) {
