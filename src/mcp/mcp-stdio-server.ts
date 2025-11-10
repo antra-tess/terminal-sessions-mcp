@@ -78,7 +78,8 @@ const TOOLS = {
       type: 'object',
       properties: {
         session: { type: 'string' },
-        input: { type: 'string' }
+        input: { type: 'string' },
+        appendNewline: { type: 'boolean', description: 'Append newline after input (default: true). Set to false for escape sequences.' }
       },
       required: ['session', 'input']
     }

@@ -231,11 +231,12 @@ export class ConnectomeTestingMCP {
   async sendInput(params: {
     session: string;
     input: string;
+    appendNewline?: boolean;
   }): Promise<{ success: boolean }> {
     try {
       const sessionId = this.serviceMap.get(params.session) || params.session;
       await this.withConnectionRetry(() =>
-        this.getClient().sendInput(sessionId, params.input)
+        this.getClient().sendInput(sessionId, params.input, params.appendNewline)
       );
       return { success: true };
     } catch (error) {
