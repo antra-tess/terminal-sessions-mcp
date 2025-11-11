@@ -69,15 +69,27 @@ npx session-server --headless
 
 ### 3. Configure MCP Integration
 
-Add to your `~/.cursor/mcp.json` or Claude Desktop config:
+**First, find your installation path:**
+
+```bash
+npm list -g terminal-sessions-mcp | head -1
+```
+
+This will show something like `/usr/local/lib/node_modules` or `/opt/homebrew/lib/node_modules`. Your full path will be `<that-path>/terminal-sessions-mcp`.
+
+**For Cursor:**
+1. Open Cursor Settings
+2. Go to **Cursor Settings** → **MCP**  
+3. Click **"Add Custom MCP"**
+4. This will open an editor for your MCP configuration
+5. Add the following (replacing the path with your actual installation path):
 
 ```json
 {
   "mcpServers": {
-    "connectome-session": {
-      "command": "npx",
-      "args": ["ts-node", "/absolute/path/to/terminal-sessions-mcp/src/mcp/mcp-stdio-server.ts"],
-      "cwd": "/absolute/path/to/terminal-sessions-mcp",
+    "terminal-sessions": {
+      "command": "node",
+      "args": ["/usr/local/lib/node_modules/terminal-sessions-mcp/dist/src/mcp/mcp-stdio-server.js"],
       "env": {
         "SESSION_SERVER_PORT": "3100"
       }
@@ -86,7 +98,27 @@ Add to your `~/.cursor/mcp.json` or Claude Desktop config:
 }
 ```
 
-**Note:** Replace `/absolute/path/to/` with your actual installation path. The session server must be running on the specified port before the MCP server connects.
+**For Claude Desktop:**
+Add to your `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "terminal-sessions": {
+      "command": "node",
+      "args": ["/usr/local/lib/node_modules/terminal-sessions-mcp/dist/src/mcp/mcp-stdio-server.js"],
+      "env": {
+        "SESSION_SERVER_PORT": "3100"
+      }
+    }
+  }
+}
+```
+
+**Note:** 
+- Replace `/usr/local/lib/node_modules/` with your actual npm global path
+- On macOS with Homebrew, it's typically `/opt/homebrew/lib/node_modules/`
+- The session server must be running on port 3100 before the MCP server connects
 
 ### 4. Use with Your AI Assistant
 
