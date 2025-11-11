@@ -47,12 +47,14 @@ npm install -g terminal-sessions-mcp
 npm install terminal-sessions-mcp
 ```
 
-### 2. Start the Session Server
+### 2. Start the Terminal Session Server
+
+This is the backend server that actually manages your terminal sessions:
 
 **If installed globally:**
 ```bash
 session-server
-# Starts on port 3100 (with optional GUI on port 3200)
+# Starts session server on port 3100 (with GUI on port 3200)
 ```
 
 **If installed locally:**
@@ -67,29 +69,24 @@ session-server --headless
 npx session-server --headless
 ```
 
-### 3. Configure MCP Integration
+**Keep this server running** in the background - your AI assistant will connect to it.
 
-**First, find your installation path:**
+### 3. Configure the MCP Bridge for Your AI
 
-```bash
-npm list -g terminal-sessions-mcp | head -1
-```
-
-This will show something like `/usr/local/lib/node_modules` or `/opt/homebrew/lib/node_modules`. Your full path will be `<that-path>/terminal-sessions-mcp`.
+This connects your AI assistant (Cursor/Claude) to the session server:
 
 **For Cursor:**
 1. Open Cursor Settings
 2. Go to **Cursor Settings** → **MCP**  
 3. Click **"Add Custom MCP"**
 4. This will open an editor for your MCP configuration
-5. Add the following (replacing the path with your actual installation path):
+5. Add the following:
 
 ```json
 {
   "mcpServers": {
     "terminal-sessions": {
-      "command": "node",
-      "args": ["/usr/local/lib/node_modules/terminal-sessions-mcp/dist/src/mcp/mcp-stdio-server.js"],
+      "command": "terminal-sessions-mcp",
       "env": {
         "SESSION_SERVER_PORT": "3100"
       }
@@ -105,8 +102,7 @@ Add to your `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "terminal-sessions": {
-      "command": "node",
-      "args": ["/usr/local/lib/node_modules/terminal-sessions-mcp/dist/src/mcp/mcp-stdio-server.js"],
+      "command": "terminal-sessions-mcp",
       "env": {
         "SESSION_SERVER_PORT": "3100"
       }
@@ -115,10 +111,29 @@ Add to your `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
-**Note:** 
-- Replace `/usr/local/lib/node_modules/` with your actual npm global path
-- On macOS with Homebrew, it's typically `/opt/homebrew/lib/node_modules/`
-- The session server must be running on port 3100 before the MCP server connects
+**If the above doesn't work**, you may need to use the full path. Find it with:
+```bash
+which terminal-sessions-mcp
+```
+
+Then use that path in your config:
+```json
+{
+  "mcpServers": {
+    "terminal-sessions": {
+      "command": "/full/path/to/terminal-sessions-mcp",
+      "env": {
+        "SESSION_SERVER_PORT": "3100"
+      }
+    }
+  }
+}
+```
+
+**Important Notes:** 
+- **Make sure `session-server` is running** on port 3100 before starting Cursor/Claude
+- The `terminal-sessions-mcp` executable is the MCP bridge - Cursor/Claude runs it automatically
+- You don't need to run `terminal-sessions-mcp` manually - only run `session-server`
 
 ### 4. Use with Your AI Assistant
 
