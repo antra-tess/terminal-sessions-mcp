@@ -37,19 +37,33 @@ Your AI assistant can now run servers in the background while working on other t
 
 ### 1. Install
 
+**Option A: Global install (recommended)**
+```bash
+npm install -g terminal-sessions-mcp
+```
+
+**Option B: Local install**
 ```bash
 npm install terminal-sessions-mcp
 ```
 
 ### 2. Start the Session Server
 
+**If installed globally:**
+```bash
+session-server
+# Starts on port 3100 (with optional GUI on port 3200)
+```
+
+**If installed locally:**
 ```bash
 npx session-server
-# Starts on port 3100 (with optional GUI on port 3200)
 ```
 
 **Headless mode (no GUI):**
 ```bash
+session-server --headless
+# or
 npx session-server --headless
 ```
 
