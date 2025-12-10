@@ -14,3 +14,12 @@ export { RobustSessionClient } from './client/websocket-client';
 // MCP components
 export { ConnectomeTestingMCP } from './mcp/mcp-server';
 
+// Utilities
+export { 
+  cleanTerminalOutput, 
+  cleanLogLines, 
+  stripAnsi, 
+  handleCarriageReturns 
+} from './utils/ansi-clean';
+export type { CleanOptions } from './utils/ansi-clean';
+

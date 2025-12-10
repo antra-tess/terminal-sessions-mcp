@@ -5,6 +5,7 @@
  */
 
 import { RobustSessionClient } from '../client/websocket-client';
+import { cleanTerminalOutput, cleanLogLines, CleanOptions } from '../utils/ansi-clean';
 
 interface ServiceConfig {
   name: string;
@@ -18,6 +19,12 @@ interface CommandResult {
   output: string;
   exitCode: number;
   duration: number;
+}
+
+/** Options for controlling output formatting */
+interface OutputOptions {
+  /** If true, return raw terminal output with ANSI codes intact */
+  raw?: boolean;
 }
 
 interface LogMatch {
@@ -74,7 +81,7 @@ export class ConnectomeTestingMCP {
    * Start a service with intelligent startup detection
    * @tool
    */
-  async startService(config: ServiceConfig): Promise<{
+  async startService(config: ServiceConfig & { raw?: boolean }): Promise<{
     status: 'ready' | 'error' | 'running';
     logs: string[];
     sessionId?: string;
@@ -86,10 +93,10 @@ export class ConnectomeTestingMCP {
         this.serviceMap.set(config.name, result.sessionId);
       }
       
-      // Format response for readability
+      // Format response for readability, clean logs unless raw mode
       return {
         status: result.status,
-        logs: result.logs,
+        logs: cleanLogLines(result.logs, { raw: config.raw }),
         sessionId: result.sessionId
       };
     } catch (error: any) {
@@ -113,9 +120,16 @@ export class ConnectomeTestingMCP {
   async runCommand(params: {
     session: string; // Can be sessionId or service name
     command: string;
+    raw?: boolean; // If true, preserve raw ANSI codes
   }): Promise<CommandResult> {
     const sessionId = this.serviceMap.get(params.session) || params.session;
-    return await this.getClient().exec(sessionId, params.command);
+    const result = await this.getClient().exec(sessionId, params.command);
+    
+    // Clean output unless raw mode is requested
+    return {
+      ...result,
+      output: cleanTerminalOutput(result.output, { raw: params.raw })
+    };
   }
   
   /**
@@ -125,9 +139,13 @@ export class ConnectomeTestingMCP {
   async tailLogs(params: {
     session: string;
     lines?: number;
+    raw?: boolean; // If true, preserve raw ANSI codes
   }): Promise<string[]> {
     const sessionId = this.serviceMap.get(params.session) || params.session;
-    return await this.getClient().getOutput(sessionId, params.lines || 50);
+    const logs = await this.getClient().getOutput(sessionId, params.lines || 50);
+    
+    // Clean logs unless raw mode is requested
+    return cleanLogLines(logs, { raw: params.raw });
   }
   
   /**
@@ -138,13 +156,25 @@ export class ConnectomeTestingMCP {
     session: string;
     pattern: string;
     context?: number;
+    raw?: boolean; // If true, preserve raw ANSI codes
   }): Promise<LogMatch[]> {
     const sessionId = this.serviceMap.get(params.session) || params.session;
-    return await this.getClient().searchLogs(
+    const results = await this.getClient().searchLogs(
       sessionId, 
       params.pattern, 
       params.context || 3
     );
+    
+    // Clean results unless raw mode is requested
+    if (params.raw) {
+      return results;
+    }
+    
+    return results.map((match: LogMatch) => ({
+      ...match,
+      line: cleanTerminalOutput(match.line, { raw: false }),
+      context: match.context ? cleanLogLines(match.context, { raw: false }) : []
+    }));
   }
   
   /**
@@ -316,6 +346,7 @@ export class ConnectomeTestingMCP {
     test: string;
     cleanup?: string[];
     timeout?: number;
+    raw?: boolean; // If true, preserve raw ANSI codes
   }): Promise<{
     success: boolean;
     output: string;
@@ -329,9 +360,9 @@ export class ConnectomeTestingMCP {
       // Create test session
       await this.createSession({ id: sessionId });
       
-      // Run setup commands
+      // Run setup commands (pass raw through)
       for (const cmd of params.setup) {
-        const result = await this.runCommand({ session: sessionId, command: cmd });
+        const result = await this.runCommand({ session: sessionId, command: cmd, raw: params.raw });
         outputs.push(`$ ${cmd}\n${result.output}\n`);
         
         if (result.exitCode !== 0) {
@@ -339,17 +370,18 @@ export class ConnectomeTestingMCP {
         }
       }
       
-      // Run test
+      // Run test (pass raw through)
       const testResult = await this.runCommand({ 
         session: sessionId, 
-        command: params.test 
+        command: params.test,
+        raw: params.raw
       });
       outputs.push(`$ ${params.test}\n${testResult.output}\n`);
       
       // Run cleanup
       if (params.cleanup) {
         for (const cmd of params.cleanup) {
-          await this.runCommand({ session: sessionId, command: cmd });
+          await this.runCommand({ session: sessionId, command: cmd, raw: params.raw });
         }
       }
       

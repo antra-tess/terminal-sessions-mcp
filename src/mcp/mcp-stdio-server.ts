@@ -38,7 +38,8 @@ const TOOLS = {
         command: { type: 'string', description: 'Command to run' },
         cwd: { type: 'string', description: 'Working directory' },
         readyPatterns: { type: 'array', items: { type: 'string' } },
-        errorPatterns: { type: 'array', items: { type: 'string' } }
+        errorPatterns: { type: 'array', items: { type: 'string' } },
+        raw: { type: 'boolean', description: 'If true, preserve raw ANSI escape codes in output (default: false, returns clean text)' }
       },
       required: ['name', 'command']
     }
@@ -49,7 +50,8 @@ const TOOLS = {
       type: 'object',
       properties: {
         session: { type: 'string' },
-        command: { type: 'string' }
+        command: { type: 'string' },
+        raw: { type: 'boolean', description: 'If true, preserve raw ANSI escape codes in output (default: false, returns clean text)' }
       },
       required: ['session', 'command']
     }
@@ -67,7 +69,8 @@ const TOOLS = {
       type: 'object',
       properties: {
         session: { type: 'string' },
-        lines: { type: 'number' }
+        lines: { type: 'number' },
+        raw: { type: 'boolean', description: 'If true, preserve raw ANSI escape codes in output (default: false, returns clean text)' }
       },
       required: ['session']
     }
@@ -122,7 +125,8 @@ const TOOLS = {
       properties: {
         session: { type: 'string', description: 'Session to search in' },
         pattern: { type: 'string', description: 'Pattern to search for (regex supported)' },
-        context: { type: 'number', description: 'Number of context lines to show (default: 3)' }
+        context: { type: 'number', description: 'Number of context lines to show (default: 3)' },
+        raw: { type: 'boolean', description: 'If true, preserve raw ANSI escape codes in output (default: false, returns clean text)' }
       },
       required: ['session', 'pattern']
     }
