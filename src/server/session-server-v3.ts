@@ -112,6 +112,7 @@ type SessionEventMap = {
 export class PersistentSessionServer extends EventEmitter {
   private sessions: Map<string, SessionInfo> = new Map();
   private readonly maxLogSize = 10000; // lines per session
+  private readonly maxOutputBufferSize = 100 * 1024 * 1024; // 100MB max buffer size
   private readonly commandTimeout = 2000; // 2 seconds - quick return
   private readonly promptMarker = '<<<PROMPT>>>';
   private readonly exitCodeMarker = '<<<EXIT:';
@@ -171,6 +172,14 @@ export class PersistentSessionServer extends EventEmitter {
       sessionInfo.lastActivity = new Date();
       sessionInfo.outputBuffer += data;
       
+      // Prevent unbounded buffer growth - trim to last portion if too large
+      if (sessionInfo.outputBuffer.length > this.maxOutputBufferSize) {
+        // Keep the last half of the max size to avoid constant trimming
+        sessionInfo.outputBuffer = sessionInfo.outputBuffer.slice(
+          -Math.floor(this.maxOutputBufferSize / 2)
+        );
+      }
+      
       // Buffer characters and only log complete lines
       sessionInfo.lineBuffer += data;
       
@@ -189,6 +198,11 @@ export class PersistentSessionServer extends EventEmitter {
       
       // The last element is either empty (if data ended with newline) or incomplete
       sessionInfo.lineBuffer = segments[segments.length - 1];
+      
+      // Safeguard: if lineBuffer gets too large (pathological case of no newlines), truncate it
+      if (sessionInfo.lineBuffer.length > 100000) {
+        sessionInfo.lineBuffer = sessionInfo.lineBuffer.slice(-50000);
+      }
 
       if (data.length > 0) {
         this.notify('session:output', {
