@@ -19,7 +19,7 @@ export class WebGUIServer {
   private io: SocketIOServer;
   private sessionClient: RobustSessionClient;
 
-  constructor(port: number = GUI_PORT) {
+  constructor(port: number = GUI_PORT, host: string = 'localhost') {
     this.app = express();
     this.httpServer = createServer(this.app);
     this.io = new SocketIOServer(this.httpServer, {
@@ -35,12 +35,13 @@ export class WebGUIServer {
     this.setupRoutes();
     this.setupSocketIO();
 
-    this.httpServer.listen(port, () => {
+    this.httpServer.listen(port, host, () => {
+      const displayHost = host === '0.0.0.0' ? '<all interfaces>' : host;
       console.log(`
 ╔═══════════════════════════════════════════╗
 ║   Terminal Sessions Web GUI               ║
 ║                                           ║
-║   http://localhost:${port}                    ║
+║   http://${host}:${port}
 ║                                           ║
 ║   View and interact with terminal         ║
 ║   sessions through your browser           ║

@@ -8,10 +8,24 @@ import { SessionAPI } from './websocket-api';
 import { WebGUIServer } from '../../gui/src/server';
 import { ChildProcess, spawn } from 'child_process';
 
-// Check for headless mode
+// Parse command line arguments
 const args = process.argv.slice(2);
 const headless = args.includes('--headless') || process.env.HEADLESS === 'true';
 
+// Parse --host option (e.g., --host 0.0.0.0 or --host=0.0.0.0)
+function getArgValue(argName: string): string | undefined {
+  const eqIndex = args.findIndex(a => a.startsWith(`--${argName}=`));
+  if (eqIndex !== -1) {
+    return args[eqIndex].split('=')[1];
+  }
+  const spaceIndex = args.indexOf(`--${argName}`);
+  if (spaceIndex !== -1 && args[spaceIndex + 1] && !args[spaceIndex + 1].startsWith('--')) {
+    return args[spaceIndex + 1];
+  }
+  return undefined;
+}
+
+const host = getArgValue('host') || process.env.SESSION_SERVER_HOST || 'localhost';
 const port = parseInt(process.env.SESSION_SERVER_PORT || '3100');
 const guiPort = parseInt(process.env.GUI_PORT || '3200');
 
@@ -23,16 +37,17 @@ console.log(`
 ║  collaborative AI testing             ║
 ╚═══════════════════════════════════════╝
 
-Starting session server on port ${port}...
+Starting session server on ${host}:${port}...
 `);
 
-const api = new SessionAPI(port);
+const api = new SessionAPI(port, host);
 
+const displayHost = host === '0.0.0.0' ? '<hostname>' : host;
 console.log(`
 ✅ Session Server ready!
 
-WebSocket URL: ws://localhost:${port}
-Health Check: http://localhost:${port}/health
+WebSocket URL: ws://${displayHost}:${port}
+Health Check: http://${displayHost}:${port}/health
 
 Available methods:
 - session.create    Create a new terminal session
@@ -53,9 +68,9 @@ Available methods:
 let guiServer: WebGUIServer | null = null;
 if (!headless) {
   try {
-    console.log(`Starting web GUI on port ${guiPort}...`);
-    guiServer = new WebGUIServer(guiPort);
-    console.log(`✅ Web GUI ready at http://localhost:${guiPort}\n`);
+    console.log(`Starting web GUI on ${host}:${guiPort}...`);
+    guiServer = new WebGUIServer(guiPort, host);
+    console.log(`✅ Web GUI ready at http://${displayHost}:${guiPort}\n`);
   } catch (error: any) {
     console.error(`Failed to start GUI server: ${error.message}`);
     console.log('Continuing in headless mode...\n');

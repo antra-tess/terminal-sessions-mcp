@@ -41,7 +41,7 @@ export class SessionAPI {
   private subscriptions = new Map<WebSocket, SubscriptionState>();
   private serverListeners: Array<{ event: string; handler: (payload: any) => void }> = [];
   
-  constructor(port: number = 3100) {
+  constructor(port: number = 3100, host: string = 'localhost') {
     this.server = new PersistentSessionServer();
     this.registerServerListener('session:created', (payload) => {
       this.pushEvent('session:created', payload, payload.sessionId);
@@ -110,8 +110,8 @@ export class SessionAPI {
       });
     });
     
-    this.httpServer.listen(port, () => {
-      console.log(`[SessionAPI] Listening on port ${port}`);
+    this.httpServer.listen(port, host, () => {
+      console.log(`[SessionAPI] Listening on ${host}:${port}`);
     });
   }
   
