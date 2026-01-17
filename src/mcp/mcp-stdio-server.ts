@@ -21,8 +21,15 @@ let mcp: ConnectomeTestingMCP | null = null;
 
 function getMCP() {
   if (!mcp) {
-    const port = process.env.SESSION_SERVER_PORT || '3100';
-    mcp = new ConnectomeTestingMCP(`ws://localhost:${port}`);
+    // Support full URL, or host+port separately
+    const url = process.env.SESSION_SERVER_URL;
+    if (url) {
+      mcp = new ConnectomeTestingMCP(url);
+    } else {
+      const host = process.env.SESSION_SERVER_HOST || 'localhost';
+      const port = process.env.SESSION_SERVER_PORT || '3100';
+      mcp = new ConnectomeTestingMCP(`ws://${host}:${port}`);
+    }
   }
   return mcp;
 }
@@ -309,7 +316,9 @@ rl.on('line', async (line) => {
 // Minimal startup - don't pollute stderr unless debugging
 if (process.env.MCP_DEBUG) {
   console.error('Terminal Sessions MCP Server started');
-  console.error('Make sure session server is running on port 3100');
+  const url = process.env.SESSION_SERVER_URL || 
+    `ws://${process.env.SESSION_SERVER_HOST || 'localhost'}:${process.env.SESSION_SERVER_PORT || '3100'}`;
+  console.error(`Connecting to session server at: ${url}`);
 }
 
 // Keep process alive
