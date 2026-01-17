@@ -12,6 +12,7 @@ import { RobustSessionClient } from '../../src/client/websocket-client';
 
 const GUI_PORT = parseInt(process.env.GUI_PORT || '3200');
 const SESSION_SERVER_URL = process.env.SESSION_SERVER_URL || 'ws://localhost:3100';
+const SESSION_SERVER_TOKEN = process.env.SESSION_SERVER_TOKEN;
 
 export class WebGUIServer {
   private app: express.Application;
@@ -29,8 +30,8 @@ export class WebGUIServer {
       }
     });
 
-    // Connect to session server
-    this.sessionClient = new RobustSessionClient(SESSION_SERVER_URL);
+    // Connect to session server (with token if provided)
+    this.sessionClient = new RobustSessionClient(SESSION_SERVER_URL, SESSION_SERVER_TOKEN);
 
     this.setupRoutes();
     this.setupSocketIO();

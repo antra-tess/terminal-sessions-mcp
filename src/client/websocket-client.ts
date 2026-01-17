@@ -16,6 +16,7 @@ enum ConnectionState {
 export class RobustSessionClient extends EventEmitter {
   private ws: any | null = null;
   private url: string;
+  private token?: string;
   private pending = new Map<string, PendingRequest>();
   private state: ConnectionState = ConnectionState.DISCONNECTED;
   private reconnectTimer: NodeJS.Timeout | null = null;
@@ -24,9 +25,10 @@ export class RobustSessionClient extends EventEmitter {
   private maxReconnectDelay = 5000; // Cap at 5 seconds
   private requestTimeout = 10000; // 10 second timeout for requests
   
-  constructor(url: string = 'ws://localhost:3100') {
+  constructor(url: string = 'ws://localhost:3100', token?: string) {
     super();
     this.url = url;
+    this.token = token;
     this.connect();
   }
   
@@ -39,7 +41,11 @@ export class RobustSessionClient extends EventEmitter {
     const WebSocket = require('ws');
     
     try {
-      this.ws = new WebSocket(this.url);
+      // Add token as query parameter if provided
+      const connectUrl = this.token 
+        ? `${this.url}${this.url.includes('?') ? '&' : '?'}token=${encodeURIComponent(this.token)}`
+        : this.url;
+      this.ws = new WebSocket(connectUrl);
       this.setupEventHandlers();
     } catch (error) {
       this.handleConnectionError(error);

@@ -36,15 +36,17 @@ interface LogMatch {
 export class ConnectomeTestingMCP {
   private client: RobustSessionClient | null = null;
   private apiUrl: string;
+  private authToken?: string;
   private serviceMap = new Map<string, string>(); // name -> sessionId
   
-  constructor(apiUrl: string = 'ws://localhost:3100') {
+  constructor(apiUrl: string = 'ws://localhost:3100', authToken?: string) {
     this.apiUrl = apiUrl;
+    this.authToken = authToken;
   }
   
   private getClient(): RobustSessionClient {
     if (!this.client) {
-      this.client = new RobustSessionClient(this.apiUrl);
+      this.client = new RobustSessionClient(this.apiUrl, this.authToken);
     }
     return this.client;
   }

@@ -22,13 +22,14 @@ let mcp: ConnectomeTestingMCP | null = null;
 function getMCP() {
   if (!mcp) {
     // Support full URL, or host+port separately
+    const token = process.env.SESSION_SERVER_TOKEN;
     const url = process.env.SESSION_SERVER_URL;
     if (url) {
-      mcp = new ConnectomeTestingMCP(url);
+      mcp = new ConnectomeTestingMCP(url, token);
     } else {
       const host = process.env.SESSION_SERVER_HOST || 'localhost';
       const port = process.env.SESSION_SERVER_PORT || '3100';
-      mcp = new ConnectomeTestingMCP(`ws://${host}:${port}`);
+      mcp = new ConnectomeTestingMCP(`ws://${host}:${port}`, token);
     }
   }
   return mcp;

@@ -40,8 +40,10 @@ export class SessionAPI {
   private httpServer: any;
   private subscriptions = new Map<WebSocket, SubscriptionState>();
   private serverListeners: Array<{ event: string; handler: (payload: any) => void }> = [];
+  private authToken?: string;
   
-  constructor(port: number = 3100, host: string = 'localhost') {
+  constructor(port: number = 3100, host: string = 'localhost', authToken?: string) {
+    this.authToken = authToken;
     this.server = new PersistentSessionServer();
     this.registerServerListener('session:created', (payload) => {
       this.pushEvent('session:created', payload, payload.sessionId);
@@ -83,7 +85,21 @@ export class SessionAPI {
     // Create WebSocket server
     this.wss = new WebSocketServer({ server: this.httpServer });
     
-    this.wss.on('connection', (ws) => {
+    this.wss.on('connection', (ws, req) => {
+      // Validate auth token if configured
+      if (this.authToken) {
+        const url = new URL(req.url || '', `http://${req.headers.host}`);
+        const providedToken = url.searchParams.get('token');
+        
+        if (providedToken !== this.authToken) {
+          if (process.env.DEBUG_SESSION_API) {
+            console.error('[SessionAPI] Rejected connection: invalid token');
+          }
+          ws.close(4001, 'Unauthorized: invalid token');
+          return;
+        }
+      }
+      
       this.ensureSubscription(ws);
       if (process.env.DEBUG_SESSION_API) {
         console.error('[SessionAPI] Client connected');

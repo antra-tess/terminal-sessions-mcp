@@ -28,6 +28,7 @@ function getArgValue(argName: string): string | undefined {
 const host = getArgValue('host') || process.env.SESSION_SERVER_HOST || 'localhost';
 const port = parseInt(process.env.SESSION_SERVER_PORT || '3100');
 const guiPort = parseInt(process.env.GUI_PORT || '3200');
+const authToken = getArgValue('token') || process.env.SESSION_SERVER_TOKEN;
 
 console.log(`
 ╔═══════════════════════════════════════╗
@@ -38,9 +39,10 @@ console.log(`
 ╚═══════════════════════════════════════╝
 
 Starting session server on ${host}:${port}...
+${authToken ? '🔐 Token authentication enabled' : '⚠️  No authentication (use --token for security)'}
 `);
 
-const api = new SessionAPI(port, host);
+const api = new SessionAPI(port, host, authToken);
 
 const displayHost = host === '0.0.0.0' ? '<hostname>' : host;
 console.log(`
