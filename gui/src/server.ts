@@ -19,8 +19,10 @@ export class WebGUIServer {
   private httpServer: any;
   private io: SocketIOServer;
   private sessionClient: RobustSessionClient;
+  private authToken?: string;
 
-  constructor(port: number = GUI_PORT, host: string = 'localhost') {
+  constructor(port: number = GUI_PORT, host: string = 'localhost', authToken?: string) {
+    this.authToken = authToken;
     this.app = express();
     this.httpServer = createServer(this.app);
     this.io = new SocketIOServer(this.httpServer, {
@@ -33,6 +35,7 @@ export class WebGUIServer {
     // Connect to session server (with token if provided)
     this.sessionClient = new RobustSessionClient(SESSION_SERVER_URL, SESSION_SERVER_TOKEN);
 
+    this.setupAuth();
     this.setupRoutes();
     this.setupSocketIO();
 
@@ -43,11 +46,44 @@ export class WebGUIServer {
 ║   Terminal Sessions Web GUI               ║
 ║                                           ║
 ║   http://${host}:${port}
+║   ${this.authToken ? '🔐 Token required: ?token=...' : '⚠️  No authentication'}
 ║                                           ║
 ║   View and interact with terminal         ║
 ║   sessions through your browser           ║
 ╚═══════════════════════════════════════════╝
       `);
+    });
+  }
+
+  private validateToken(providedToken?: string): boolean {
+    if (!this.authToken) return true; // No auth required
+    return providedToken === this.authToken;
+  }
+
+  private setupAuth(): void {
+    if (!this.authToken) return; // No auth required
+
+    // HTTP authentication middleware
+    this.app.use((req, res, next) => {
+      const token = req.query.token as string || req.headers.authorization?.replace('Bearer ', '');
+      
+      if (!this.validateToken(token)) {
+        res.status(401).json({ error: 'Unauthorized: invalid or missing token' });
+        return;
+      }
+      next();
+    });
+
+    // Socket.IO authentication middleware
+    this.io.use((socket, next) => {
+      const token = socket.handshake.query.token as string || 
+                    socket.handshake.auth.token as string;
+      
+      if (!this.validateToken(token)) {
+        next(new Error('Unauthorized: invalid or missing token'));
+        return;
+      }
+      next();
     });
   }
 

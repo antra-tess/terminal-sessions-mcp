@@ -71,8 +71,9 @@ let guiServer: WebGUIServer | null = null;
 if (!headless) {
   try {
     console.log(`Starting web GUI on ${host}:${guiPort}...`);
-    guiServer = new WebGUIServer(guiPort, host);
-    console.log(`✅ Web GUI ready at http://${displayHost}:${guiPort}\n`);
+    guiServer = new WebGUIServer(guiPort, host, authToken);
+    const tokenHint = authToken ? `?token=...` : '';
+    console.log(`✅ Web GUI ready at http://${displayHost}:${guiPort}${tokenHint}\n`);
   } catch (error: any) {
     console.error(`Failed to start GUI server: ${error.message}`);
     console.log('Continuing in headless mode...\n');
