@@ -24,12 +24,21 @@ function getMCP() {
     // Support full URL, or host+port separately
     const token = process.env.SESSION_SERVER_TOKEN;
     const url = process.env.SESSION_SERVER_URL;
+    
+    // Always log connection info for debugging
+    console.error(`[MCP] SESSION_SERVER_URL env: ${url || '(not set)'}`);
+    console.error(`[MCP] SESSION_SERVER_PORT env: ${process.env.SESSION_SERVER_PORT || '(not set)'}`);
+    console.error(`[MCP] SESSION_SERVER_HOST env: ${process.env.SESSION_SERVER_HOST || '(not set)'}`);
+    
     if (url) {
+      console.error(`[MCP] Using URL: ${url}`);
       mcp = new ConnectomeTestingMCP(url, token);
     } else {
       const host = process.env.SESSION_SERVER_HOST || 'localhost';
       const port = process.env.SESSION_SERVER_PORT || '3100';
-      mcp = new ConnectomeTestingMCP(`ws://${host}:${port}`, token);
+      const fallbackUrl = `ws://${host}:${port}`;
+      console.error(`[MCP] Using fallback URL: ${fallbackUrl}`);
+      mcp = new ConnectomeTestingMCP(fallbackUrl, token);
     }
   }
   return mcp;
