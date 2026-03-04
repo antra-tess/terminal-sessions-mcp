@@ -38,13 +38,22 @@ export class ConnectomeTestingMCP {
   private apiUrl: string;
   private authToken?: string;
   private serviceMap = new Map<string, string>(); // name -> sessionId
-  
+
+  /** MCPL callback — fired when a session is created (nullable, zero overhead when MCPL off) */
+  onSessionCreated?: (sessionId: string, name?: string) => void;
+  /** MCPL callback — fired when a session exits or is killed (nullable, zero overhead when MCPL off) */
+  onSessionExited?: (sessionId: string) => void;
+
   constructor(apiUrl: string = 'ws://localhost:3100', authToken?: string) {
     this.apiUrl = apiUrl;
     this.authToken = authToken;
   }
-  
-  private getClient(): RobustSessionClient {
+
+  /**
+   * Get or create the underlying WebSocket client.
+   * Exposed for MCPL channel manager to subscribe to session events.
+   */
+  getClient(): RobustSessionClient {
     if (!this.client) {
       this.client = new RobustSessionClient(this.apiUrl, this.authToken);
     }
@@ -93,8 +102,9 @@ export class ConnectomeTestingMCP {
       
       if (result.sessionId) {
         this.serviceMap.set(config.name, result.sessionId);
+        this.onSessionCreated?.(result.sessionId, config.name);
       }
-      
+
       // Format response for readability, clean logs unless raw mode
       return {
         status: result.status,
@@ -221,7 +231,7 @@ export class ConnectomeTestingMCP {
     
     try {
       await this.getClient().request('session.kill', { sessionId, graceful: params.graceful });
-      
+
       // Remove from service map
       for (const [name, id] of Array.from(this.serviceMap.entries())) {
         if (id === sessionId) {
@@ -229,11 +239,13 @@ export class ConnectomeTestingMCP {
           break;
         }
       }
-      
-      return { 
+
+      this.onSessionExited?.(sessionId);
+
+      return {
         success: true,
-        message: params.graceful === false 
-          ? 'Session forcefully terminated' 
+        message: params.graceful === false
+          ? 'Session forcefully terminated'
           : 'Session terminated gracefully'
       };
     } catch (error) {
@@ -253,7 +265,9 @@ export class ConnectomeTestingMCP {
     sessionId: string;
     info: any;
   }> {
-    return await this.getClient().createSession(params);
+    const result = await this.getClient().createSession(params);
+    this.onSessionCreated?.(params.id);
+    return result;
   }
   
   /**
@@ -325,12 +339,17 @@ export class ConnectomeTestingMCP {
     graceful?: boolean;
   }): Promise<{ success: boolean; message?: string }> {
     try {
+      // Notify MCPL of each session being removed before clearing
+      for (const sessionId of this.serviceMap.values()) {
+        this.onSessionExited?.(sessionId);
+      }
+
       await this.getClient().killAll(params?.graceful);
       this.serviceMap.clear();
-      return { 
+      return {
         success: true,
-        message: params?.graceful === false 
-          ? 'All sessions forcefully terminated' 
+        message: params?.graceful === false
+          ? 'All sessions forcefully terminated'
           : 'All sessions terminated gracefully'
       };
     } catch (error) {
