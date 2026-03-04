@@ -21,6 +21,7 @@ import type {
 } from './types';
 import type { McplClient } from './client';
 import type { RobustSessionClient } from '../client/websocket-client';
+import type { WatchManager, WatchMatchResult } from './watch-manager';
 import { cleanTerminalOutput } from '../utils/ansi-clean';
 
 const DEFAULT_BATCH_WINDOW_MS = 500;
@@ -33,6 +34,7 @@ export class ChannelManager {
   private batchTimer: ReturnType<typeof setTimeout> | null = null;
   private batchWindowMs: number;
   private outputCounter = 0;
+  private watchManager: WatchManager | null = null;
 
   constructor(
     private mcplClient: McplClient,
@@ -41,6 +43,17 @@ export class ChannelManager {
   ) {
     this.batchWindowMs = batchWindowMs ??
       (parseInt(process.env.MCPL_BATCH_WINDOW_MS || '', 10) || DEFAULT_BATCH_WINDOW_MS);
+  }
+
+  /**
+   * Set the WatchManager instance for dynamic output watches.
+   * Wires the halt-fired callback to emit synthetic incoming messages.
+   */
+  setWatchManager(wm: WatchManager): void {
+    this.watchManager = wm;
+    wm.onHaltFired = (sessionId, match) => {
+      this.emitSyntheticHaltMessage(sessionId, match);
+    };
   }
 
   /**
@@ -102,6 +115,7 @@ export class ChannelManager {
    */
   onSessionExited(sessionId: string): void {
     const channelId = ChannelManager.channelId(sessionId);
+    this.watchManager?.onSessionExited(sessionId);
     if (this.allChannels.delete(channelId)) {
       this.openChannels.delete(channelId);
       this.mcplClient.sendChannelsChanged(undefined, [channelId]);
@@ -132,12 +146,29 @@ export class ChannelManager {
       const cleaned = cleanTerminalOutput(rawOutput);
       if (!cleaned) return;
 
+      // Evaluate watches against cleaned output
+      const watchMatches = this.watchManager?.evaluateOutput(sessionId, cleaned) ?? [];
+
+      const metadata: Record<string, unknown> = { source: 'terminal', sessionId };
+
+      // If any watch matched, merge first match metadata + trigger flag
+      if (watchMatches.length > 0) {
+        const first = watchMatches[0];
+        metadata.triggerInference = true;
+        metadata.watchId = first.watchId;
+        metadata.watchType = first.watchType;
+        if (first.watchLabel) metadata.watchLabel = first.watchLabel;
+        if (first.patternMatch) metadata.patternMatch = first.patternMatch;
+        if (first.patternName) metadata.patternName = first.patternName;
+      }
+
       const message: ChannelIncomingMessage = {
         channelId,
         messageId: `output-${++this.outputCounter}`,
         author: { id: 'terminal', name: sessionId },
         timestamp: new Date().toISOString(),
         content: [{ type: 'text', text: cleaned }],
+        metadata,
       };
 
       this.batchBuffer.push(message);
@@ -235,6 +266,7 @@ export class ChannelManager {
    * Cleanup timers.
    */
   destroy(): void {
+    this.watchManager?.destroy();
     if (this.batchTimer) {
       clearTimeout(this.batchTimer);
       this.batchTimer = null;
@@ -242,6 +274,32 @@ export class ChannelManager {
   }
 
   // -- Private --
+
+  private emitSyntheticHaltMessage(sessionId: string, match: WatchMatchResult): void {
+    const channelId = ChannelManager.channelId(sessionId);
+    if (!this.openChannels.has(channelId)) return;
+
+    const message: ChannelIncomingMessage = {
+      channelId,
+      messageId: `halt-${++this.outputCounter}`,
+      author: { id: 'terminal', name: sessionId },
+      timestamp: new Date().toISOString(),
+      content: [{ type: 'text', text: `[halt watch] No output for ${match.haltDurationSeconds}s on session ${sessionId}` }],
+      metadata: {
+        source: 'terminal',
+        sessionId,
+        triggerInference: true,
+        watchId: match.watchId,
+        watchType: 'halt',
+        ...(match.watchLabel && { watchLabel: match.watchLabel }),
+        haltDurationSeconds: match.haltDurationSeconds,
+      },
+    };
+
+    this.mcplClient.sendIncoming([message]).catch(err => {
+      console.error('[MCPL] Failed to send synthetic halt message:', err);
+    });
+  }
 
   private buildDescriptor(sessionId: string, name?: string): ChannelDescriptor {
     const channelId = ChannelManager.channelId(sessionId);

@@ -6,6 +6,7 @@
 
 import { RobustSessionClient } from '../client/websocket-client';
 import { cleanTerminalOutput, cleanLogLines, CleanOptions } from '../utils/ansi-clean';
+import type { WatchManager, WatchInfo } from '../mcpl/watch-manager';
 
 interface ServiceConfig {
   name: string;
@@ -43,6 +44,13 @@ export class ConnectomeTestingMCP {
   onSessionCreated?: (sessionId: string, name?: string) => void;
   /** MCPL callback — fired when a session exits or is killed (nullable, zero overhead when MCPL off) */
   onSessionExited?: (sessionId: string) => void;
+
+  /** Watch manager for dynamic output watches (nullable, zero overhead when not set) */
+  private watchManager: WatchManager | null = null;
+
+  setWatchManager(wm: WatchManager): void {
+    this.watchManager = wm;
+  }
 
   constructor(apiUrl: string = 'ws://localhost:3100', authToken?: string) {
     this.apiUrl = apiUrl;
@@ -450,6 +458,75 @@ export class ConnectomeTestingMCP {
     }
   }
   
+  /**
+   * Add a dynamic pattern watch — triggers inference when regex matches session output.
+   * @tool
+   */
+  watchPattern(params: {
+    session: string;
+    pattern: string;
+    label?: string;
+    once?: boolean;
+  }): { watchId: string } {
+    if (!this.watchManager) {
+      throw new Error('Watch manager not available (MCPL not enabled)');
+    }
+    const sessionId = this.serviceMap.get(params.session) || params.session;
+    return this.watchManager.addPatternWatch({
+      sessionId,
+      pattern: params.pattern,
+      label: params.label,
+      once: params.once,
+    });
+  }
+
+  /**
+   * Add a dynamic halt watch — triggers inference after N seconds of silence.
+   * @tool
+   */
+  watchHalt(params: {
+    session: string;
+    durationSeconds: number;
+    label?: string;
+    once?: boolean;
+  }): { watchId: string } {
+    if (!this.watchManager) {
+      throw new Error('Watch manager not available (MCPL not enabled)');
+    }
+    const sessionId = this.serviceMap.get(params.session) || params.session;
+    return this.watchManager.addHaltWatch({
+      sessionId,
+      durationSeconds: params.durationSeconds,
+      label: params.label,
+      once: params.once,
+    });
+  }
+
+  /**
+   * Remove a watch by ID.
+   * @tool
+   */
+  removeWatch(params: { watchId: string }): { removed: boolean } {
+    if (!this.watchManager) {
+      throw new Error('Watch manager not available (MCPL not enabled)');
+    }
+    return this.watchManager.removeWatch(params.watchId);
+  }
+
+  /**
+   * List active watches, optionally filtered by session.
+   * @tool
+   */
+  listWatches(params?: { session?: string }): WatchInfo[] {
+    if (!this.watchManager) {
+      throw new Error('Watch manager not available (MCPL not enabled)');
+    }
+    const sessionId = params?.session
+      ? (this.serviceMap.get(params.session) || params.session)
+      : undefined;
+    return this.watchManager.listWatches(sessionId);
+  }
+
   /**
    * Wait for a pattern to appear in logs
    * @tool

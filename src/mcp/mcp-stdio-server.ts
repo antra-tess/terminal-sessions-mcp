@@ -14,6 +14,7 @@ import { McplClient } from '../mcpl/client';
 import { McplDispatcher } from '../mcpl/dispatcher';
 import { ChannelManager } from '../mcpl/channels';
 import { ContextProvider } from '../mcpl/context';
+import { WatchManager } from '../mcpl/watch-manager';
 import { buildServerCapabilities } from '../mcpl/feature-sets';
 import { McplMethod } from '../mcpl/types';
 import type {
@@ -186,6 +187,51 @@ const TOOLS = {
       },
       required: ['session']
     }
+  },
+  watchPattern: {
+    description: 'Watch for a regex pattern in session output. When matched, triggers inference so the agent wakes up. Requires MCPL.',
+    parameters: {
+      type: 'object',
+      properties: {
+        session: { type: 'string', description: 'Session name or ID to watch' },
+        pattern: { type: 'string', description: 'Regex pattern to match against output lines' },
+        label: { type: 'string', description: 'Optional label for this watch (shown when triggered)' },
+        once: { type: 'boolean', description: 'If true, auto-remove after first match (default: false)' }
+      },
+      required: ['session', 'pattern']
+    }
+  },
+  watchHalt: {
+    description: 'Watch for output silence on a session. Triggers inference after N seconds of no output. Requires MCPL.',
+    parameters: {
+      type: 'object',
+      properties: {
+        session: { type: 'string', description: 'Session name or ID to watch' },
+        durationSeconds: { type: 'number', description: 'Seconds of silence before triggering' },
+        label: { type: 'string', description: 'Optional label for this watch (shown when triggered)' },
+        once: { type: 'boolean', description: 'If true, auto-remove after first fire (default: true)' }
+      },
+      required: ['session', 'durationSeconds']
+    }
+  },
+  removeWatch: {
+    description: 'Remove a watch by its ID. Requires MCPL.',
+    parameters: {
+      type: 'object',
+      properties: {
+        watchId: { type: 'string', description: 'The watch ID to remove' }
+      },
+      required: ['watchId']
+    }
+  },
+  listWatches: {
+    description: 'List all active watches, optionally filtered by session. Requires MCPL.',
+    parameters: {
+      type: 'object',
+      properties: {
+        session: { type: 'string', description: 'Optional session name or ID to filter by' }
+      }
+    }
   }
 };
 
@@ -217,8 +263,15 @@ function initMcplAfterHandshake(): void {
   const mcpInstance = getMCP();
   const wsClient = mcpInstance.getClient();
 
+  // Create watch manager for dynamic output watches
+  const watchManager = new WatchManager();
+
   // Create channel manager
   channelManager = new ChannelManager(mcplClient, wsClient);
+  channelManager.setWatchManager(watchManager);
+
+  // Wire watch manager into MCP instance for tool dispatch
+  mcpInstance.setWatchManager(watchManager);
 
   // Create context provider
   contextProvider = new ContextProvider(channelManager, wsClient);
@@ -367,6 +420,18 @@ rl.on('line', async (line) => {
               break;
             case 'takeScreenshot':
               result = await mcpInstance.takeScreenshot(args);
+              break;
+            case 'watchPattern':
+              result = mcpInstance.watchPattern(args);
+              break;
+            case 'watchHalt':
+              result = mcpInstance.watchHalt(args);
+              break;
+            case 'removeWatch':
+              result = mcpInstance.removeWatch(args);
+              break;
+            case 'listWatches':
+              result = mcpInstance.listWatches(args);
               break;
             default:
               throw new Error(`Unknown tool: ${name}`);
