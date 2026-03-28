@@ -155,7 +155,7 @@ export class SessionAPI {
           break;
           
         case 'session.exec':
-          result = await this.server.execCommand(params.sessionId, params.command);
+          result = await this.server.execCommand(params.sessionId, params.command, params.timeout);
           break;
           
         case 'session.output':

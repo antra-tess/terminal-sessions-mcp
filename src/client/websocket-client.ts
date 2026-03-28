@@ -165,20 +165,26 @@ export class RobustSessionClient extends EventEmitter {
     if (this.state !== ConnectionState.CONNECTED) {
       await this.waitForConnection();
     }
-    
+
     return new Promise((resolve, reject) => {
       const id = Math.random().toString(36).substr(2, 9);
       const message = { id, method, params };
-      
+
       if (process.env.MCP_DEBUG) {
         console.error('[RobustClient] Sending request:', message);
       }
-      
+
+      // Use command timeout if provided, otherwise default request timeout
+      // Add 5s buffer so the server-side timeout fires first with a proper response
+      const effectiveTimeout = (method === 'session.exec' && params?.timeout)
+        ? params.timeout + 5000
+        : this.requestTimeout;
+
       // Set up timeout
       const timeout = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`Request timeout: ${method}`));
-      }, this.requestTimeout);
+      }, effectiveTimeout);
       
       // Store pending request
       this.pending.set(id, { resolve, reject, timeout });
@@ -228,8 +234,8 @@ export class RobustSessionClient extends EventEmitter {
     return this.request('session.create', params);
   }
   
-  async exec(sessionId: string, command: string) {
-    return this.request('session.exec', { sessionId, command });
+  async exec(sessionId: string, command: string, timeout?: number) {
+    return this.request('session.exec', { sessionId, command, timeout });
   }
   
   async getOutput(sessionId: string, lines?: number) {

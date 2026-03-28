@@ -31,11 +31,13 @@ interface SessionInfo {
     command: string;
     resolve: (result: CommandResult) => void;
     startTime: number;
+    timeout: number;
   }>;
   currentCommand?: {
     command: string;
     resolve: (result: CommandResult) => void;
     startTime: number;
+    timeout: number;
   };
   lineBuffer: string; // Buffer for incomplete lines
 }
@@ -113,9 +115,9 @@ export class PersistentSessionServer extends EventEmitter {
   private sessions: Map<string, SessionInfo> = new Map();
   private readonly maxLogSize = 10000; // lines per session
   private readonly maxOutputBufferSize = 100 * 1024 * 1024; // 100MB max buffer size
-  private readonly commandTimeout = 2000; // 2 seconds - quick return
-  private readonly promptMarker = '<<<PROMPT>>>';
+  private readonly defaultCommandTimeout = 30000; // 30 seconds default
   private readonly exitCodeMarker = '<<<EXIT:';
+  private readonly exitCodeEnd = '>>>';
 
   constructor() {
     super();
@@ -267,9 +269,10 @@ export class PersistentSessionServer extends EventEmitter {
   }
 
   /**
-   * Execute a command in a session
+   * Execute a command in a session and wait for it to finish.
+   * Detects completion via an exit-code marker echoed after the command.
    */
-  async execCommand(sessionId: string, command: string): Promise<CommandResult> {
+  async execCommand(sessionId: string, command: string, timeout?: number): Promise<CommandResult> {
     const session = this.sessions.get(sessionId);
     if (!session) {
       throw new Error(`Session ${sessionId} not found`);
@@ -281,12 +284,13 @@ export class PersistentSessionServer extends EventEmitter {
 
     return new Promise((resolve) => {
       const startTime = Date.now();
-      
+
       // Queue the command
       session.commandQueue.push({
         command,
         resolve,
-        startTime
+        startTime,
+        timeout: timeout ?? this.defaultCommandTimeout
       });
 
       // Process queue if not already processing
@@ -320,47 +324,89 @@ export class PersistentSessionServer extends EventEmitter {
       startedAt: new Date(currentCommand.startTime)
     });
 
-    // Write command
+    // Write the command followed by an exit-code marker so we can detect completion
     session.shell.write(currentCommand.command + '\n');
+    // Small delay to ensure the command starts before we write the marker echo
+    setTimeout(() => {
+      if (session.isAlive && session.currentCommand === currentCommand) {
+        session.shell.write(`echo "${this.exitCodeMarker}$?${this.exitCodeEnd}"\n`);
+      }
+    }, 50);
 
-    // Set up timeout - return quickly with whatever output we have
-    const timeout = setTimeout(() => {
-      session.isProcessingCommand = false;
-      
-      // Clean output (remove our markers if any)
-      const cleanOutput = session.outputBuffer
-        .replace(new RegExp(`${this.exitCodeMarker}\\d+\\n?`, 'g'), '')
-        .replace(new RegExp(`${this.promptMarker}\\n?`, 'g'), '')
-        .trim();
-      
-      this.notify('command:finished', {
-        sessionId: session.id,
-        command: currentCommand.command,
-        duration: Date.now() - currentCommand.startTime,
-        exitCode: 0,
-        output: cleanOutput,
-        finishedAt: new Date()
-      });
+    // Set up fallback timeout
+    const fallbackTimeout = setTimeout(() => {
+      this.resolveCommand(session, -1); // -1 = timed out
+    }, currentCommand.timeout);
 
-      currentCommand.resolve({
-        output: cleanOutput,
-        exitCode: 0, // 0 indicates "still running" rather than error
-        duration: Date.now() - currentCommand.startTime
-      });
-      session.currentCommand = undefined;
-      this.processCommandQueue(session);
-    }, this.commandTimeout);
-
-    // Store timeout so we can clear it
-    (session as any).currentTimeout = timeout;
+    // Store timeout so we can clear it on early completion
+    (session as any).currentTimeout = fallbackTimeout;
   }
 
   /**
-   * Check if command execution is complete (simplified)
+   * Resolve the current command with the given exit code
+   */
+  private resolveCommand(session: SessionInfo, exitCode: number): void {
+    const currentCommand = session.currentCommand;
+    if (!currentCommand) return;
+
+    // Clear fallback timeout
+    if ((session as any).currentTimeout) {
+      clearTimeout((session as any).currentTimeout);
+      (session as any).currentTimeout = undefined;
+    }
+
+    session.isProcessingCommand = false;
+
+    // Clean output: remove the marker line and the echo command itself
+    const markerRegex = new RegExp(
+      `echo "${this.exitCodeMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\$\\?${this.exitCodeEnd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"\\r?\\n?`,
+      'g'
+    );
+    const exitRegex = new RegExp(
+      `${this.exitCodeMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\d+${this.exitCodeEnd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\r?\\n?`,
+      'g'
+    );
+    const cleanOutput = session.outputBuffer
+      .replace(markerRegex, '')
+      .replace(exitRegex, '')
+      .trim();
+
+    const duration = Date.now() - currentCommand.startTime;
+
+    this.notify('command:finished', {
+      sessionId: session.id,
+      command: currentCommand.command,
+      duration,
+      exitCode,
+      output: cleanOutput,
+      finishedAt: new Date()
+    });
+
+    currentCommand.resolve({
+      output: cleanOutput,
+      exitCode,
+      duration
+    });
+
+    session.currentCommand = undefined;
+    this.processCommandQueue(session);
+  }
+
+  /**
+   * Check if command execution is complete by scanning for the exit-code marker.
+   * Uses a regex to match the resolved marker (digits only) and skip the
+   * echo command itself which contains the literal `$?`.
    */
   private checkCommandCompletion(session: SessionInfo): void {
-    // Since we're using a timeout-based approach, we don't need complex detection
-    // The output is being collected in the buffer and will be returned when timeout fires
+    if (!session.currentCommand) return;
+
+    // Match the resolved marker: <<<EXIT:0>>> or <<<EXIT:127>>> etc.
+    // This skips the echo command line which contains <<<EXIT:$?>>>
+    const match = session.outputBuffer.match(/<<<EXIT:(\d+)>>>/);
+    if (!match) return;
+
+    const exitCode = parseInt(match[1], 10);
+    this.resolveCommand(session, exitCode);
   }
 
   /**
@@ -411,7 +457,8 @@ export class PersistentSessionServer extends EventEmitter {
   }
 
   /**
-   * Start a service (simplified - just create session and run command)
+   * Launch a process — write the command and optionally poll for ready/error patterns.
+   * Unlike execCommand, this does NOT wait for the command to exit.
    */
   async startService(options: ServiceStartOptions): Promise<{
     status: 'ready' | 'running' | 'error';
@@ -425,34 +472,48 @@ export class PersistentSessionServer extends EventEmitter {
       shell: options.shell
     });
 
-    // Execute command and return quickly
-    const result = await this.execCommand(sessionId, options.command);
-    
     const session = this.sessions.get(sessionId)!;
-    
-    // Simple status detection from output
-    let status: 'ready' | 'running' | 'error' = 'running';
-    
-    if (options.errorPatterns) {
-      for (const pattern of options.errorPatterns) {
-        if (result.output.includes(pattern)) {
-          status = 'error';
-          break;
+
+    // Write the command (no exit-code marker — process is meant to keep running)
+    session.shell.write(options.command + '\n');
+    this.addLog(session, `$ ${options.command}`);
+
+    // Poll for ready/error patterns, or return after a brief wait
+    const hasPatterns = (options.readyPatterns && options.readyPatterns.length > 0) ||
+                        (options.errorPatterns && options.errorPatterns.length > 0);
+    const pollTimeout = hasPatterns ? 15000 : 2000; // 15s if patterns, 2s otherwise
+    const pollInterval = 200;
+    const startTime = Date.now();
+
+    while (Date.now() - startTime < pollTimeout) {
+      await this.sleep(pollInterval);
+
+      const output = session.outputBuffer;
+
+      if (options.errorPatterns) {
+        for (const pattern of options.errorPatterns) {
+          if (output.includes(pattern)) {
+            return { status: 'error', logs: session.logs.slice(-20), sessionId };
+          }
         }
       }
-    }
-    
-    if (status !== 'error' && options.readyPatterns) {
-      for (const pattern of options.readyPatterns) {
-        if (result.output.includes(pattern)) {
-          status = 'ready';
-          break;
+
+      if (options.readyPatterns) {
+        for (const pattern of options.readyPatterns) {
+          if (output.includes(pattern)) {
+            return { status: 'ready', logs: session.logs.slice(-20), sessionId };
+          }
         }
       }
+
+      // If process died, no point waiting
+      if (!session.isAlive) {
+        return { status: 'error', logs: session.logs.slice(-20), sessionId };
+      }
     }
-    
+
     return {
-      status,
+      status: 'running',
       logs: session.logs.slice(-20),
       sessionId
     };

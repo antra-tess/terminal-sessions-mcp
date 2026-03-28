@@ -46,8 +46,8 @@ function getMCP() {
 
 // Tool definitions
 const TOOLS = {
-  startService: {
-    description: 'Start a service with intelligent startup detection',
+  launch: {
+    description: 'Launch a process and optionally wait for readiness patterns in its output. Use runCommand for commands that finish on their own.',
     parameters: {
       type: 'object',
       properties: {
@@ -62,12 +62,14 @@ const TOOLS = {
     }
   },
   runCommand: {
-    description: 'Run a command in a session',
+    description: 'Run a command in a session (auto-creates the session if it does not exist)',
     parameters: {
       type: 'object',
       properties: {
-        session: { type: 'string' },
+        session: { type: 'string', description: 'Session name (will be created automatically if it does not exist)' },
         command: { type: 'string' },
+        cwd: { type: 'string', description: 'Working directory (used when auto-creating a new session)' },
+        timeout: { type: 'number', description: 'Command timeout in ms (default: 30000). Use -1 to return immediately without waiting.' },
         raw: { type: 'boolean', description: 'If true, preserve raw ANSI escape codes in output (default: false, returns clean text)' }
       },
       required: ['session', 'command']
@@ -235,8 +237,8 @@ rl.on('line', async (line) => {
           // Call the appropriate method
           const mcpInstance = getMCP();
           switch (name) {
-            case 'startService':
-              result = await mcpInstance.startService(args);
+            case 'launch':
+              result = await mcpInstance.launch(args);
               break;
             case 'runCommand':
               result = await mcpInstance.runCommand(args);

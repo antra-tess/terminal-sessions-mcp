@@ -83,7 +83,7 @@ export class ConnectomeTestingMCP {
    * Start a service with intelligent startup detection
    * @tool
    */
-  async startService(config: ServiceConfig & { raw?: boolean }): Promise<{
+  async launch(config: ServiceConfig & { raw?: boolean }): Promise<{
     status: 'ready' | 'error' | 'running';
     logs: string[];
     sessionId?: string;
@@ -122,11 +122,30 @@ export class ConnectomeTestingMCP {
   async runCommand(params: {
     session: string; // Can be sessionId or service name
     command: string;
+    cwd?: string; // Working directory (used when auto-creating session)
+    timeout?: number; // Command timeout in ms (default: 30000)
     raw?: boolean; // If true, preserve raw ANSI codes
   }): Promise<CommandResult> {
     const sessionId = this.serviceMap.get(params.session) || params.session;
-    const result = await this.getClient().exec(sessionId, params.command);
-    
+
+    // Auto-create session if it doesn't exist
+    try {
+      const sessions = await this.getClient().listSessions();
+      const exists = sessions.some((s: any) => s.id === sessionId);
+      if (!exists) {
+        await this.createSession({ id: sessionId, cwd: params.cwd });
+      }
+    } catch {
+      // If listing fails, try to create anyway — exec will give the real error
+      try {
+        await this.createSession({ id: sessionId, cwd: params.cwd });
+      } catch {
+        // Session might already exist, continue to exec
+      }
+    }
+
+    const result = await this.getClient().exec(sessionId, params.command, params.timeout);
+
     // Clean output unless raw mode is requested
     return {
       ...result,
@@ -481,7 +500,7 @@ if (require.main === module) {
     
     // Start a service
     console.log('Starting test server...');
-    const result = await mcp.startService({
+    const result = await mcp.launch({
       name: 'test-server',
       command: 'npx http-server -p 8080',
       readyPatterns: ['listening', 'available']
