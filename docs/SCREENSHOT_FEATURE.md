@@ -22,14 +22,21 @@ Screenshots preserve:
 ## How It Works
 
 ```
-Terminal Buffer → ANSI to HTML → Puppeteer → PNG Screenshot
+Terminal Session → xterm.js GUI → Puppeteer → PNG Screenshot
 ```
 
-1. **Capture** - Gets last N lines from terminal session
-2. **Convert** - ANSI escape sequences → styled HTML
-3. **Render** - Puppeteer renders HTML in headless Chrome
-4. **Screenshot** - Captures visual output as PNG
+1. **Navigate** - Puppeteer opens the web GUI (localhost:3200)
+2. **Select** - Automatically selects the target session
+3. **Wait** - Ensures xterm.js has fully rendered the terminal
+4. **Capture** - Screenshots the xterm.js canvas with proper TUI rendering
 5. **Return** - Base64 or saves to file
+
+**Key Advantage**: This captures the **actual rendered terminal state** from xterm.js, which properly handles:
+- Cursor positioning and movement
+- TUI applications (htop, vim, tmux, etc.)
+- Progress bars and animations
+- All ANSI escape sequences
+- Mouse interactions
 
 ## Usage
 
@@ -164,12 +171,17 @@ The screenshot includes:
 - `ansi-to-html` - Converts ANSI codes to HTML
 - `puppeteer` - Headless Chrome for rendering
 
+## Requirements
+
+- **Web GUI must be running**: The screenshot captures from the xterm.js GUI at `http://localhost:3200`
+- **Puppeteer**: Headless Chrome for automated GUI interaction
+- The session must exist and be visible in the GUI
+
 ## Limitations
 
-- Only captures scrollback buffer (configurable lines)
 - Static screenshot (not animated)
-- Requires headless Chrome (via Puppeteer)
-- May not capture live cursor position
+- Requires the web GUI to be accessible
+- May take 1-2 seconds to capture (GUI loading + rendering time)
 
 ## Demo
 

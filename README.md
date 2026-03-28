@@ -39,12 +39,12 @@ Your AI assistant can now run servers in the background while working on other t
 
 **Option A: Global install (recommended)**
 ```bash
-npm install -g terminal-sessions-mcp
+npm install -g term-sessions-mcp
 ```
 
 **Option B: Local install**
 ```bash
-npm install terminal-sessions-mcp
+npm install term-sessions-mcp
 ```
 
 ### 2. Start the Terminal Session Server
@@ -65,8 +65,11 @@ npx session-server
 **Headless mode (no GUI):**
 ```bash
 session-server --headless
-# or
-npx session-server --headless
+```
+
+**Remote access (bind to all interfaces):**
+```bash
+session-server --host 0.0.0.0 --token your-secret-token
 ```
 
 **Keep this server running** in the background - your AI assistant will connect to it.
@@ -183,7 +186,7 @@ All terminal control sequences work perfectly, enabling rich TUI applications:
 ### From TypeScript/JavaScript
 
 ```typescript
-import { SessionClient } from 'terminal-sessions-mcp';
+import { SessionClient } from 'term-sessions-mcp';
 
 const client = new SessionClient('ws://localhost:3100');
 
@@ -340,7 +343,7 @@ Share terminal sessions between multiple agents or humans. Send a URL to view li
 
 ```bash
 # Clone the repository
-git clone https://github.com/anima-labs/terminal-sessions-mcp.git
+git clone https://github.com/antra-tess/terminal-sessions-mcp.git
 cd terminal-sessions-mcp
 
 # Install dependencies
@@ -365,7 +368,7 @@ npx ts-node examples/service-management.ts
 
 ## Requirements
 
-- **Node.js** >= 18.0.0
+- **Node.js** 18.x, 20.x, or 22.x LTS (Node 25+ not yet supported due to node-pty compatibility)
 - **Headless Chrome** (via Puppeteer) for screenshots
 - **Modern browser** for web GUI (Chrome, Firefox, Safari, Edge)
 
@@ -373,9 +376,44 @@ npx ts-node examples/service-management.ts
 
 ### Environment Variables
 
+**Server:**
 - `SESSION_SERVER_PORT` - WebSocket session server port (default: 3100)
+- `SESSION_SERVER_HOST` - Host to bind to (default: localhost)
+- `SESSION_SERVER_TOKEN` - Authentication token (optional, recommended for remote access)
 - `GUI_PORT` - Web GUI port (default: 3200)
+
+**MCP Client:**
+- `SESSION_SERVER_URL` - Full WebSocket URL (e.g., `ws://192.168.1.100:3100`)
+- `SESSION_SERVER_HOST` - Remote host (alternative to full URL)
+- `SESSION_SERVER_PORT` - Remote port (default: 3100)
+- `SESSION_SERVER_TOKEN` - Authentication token (must match server)
 - `MCP_DEBUG` - Enable debug logging (set to "1")
+
+### Remote Connections
+
+You can connect to a session server running on a different machine:
+
+**On the remote machine:**
+```bash
+session-server --host 0.0.0.0 --token mysecrettoken
+```
+
+**In your MCP config (local machine):**
+```json
+{
+  "mcpServers": {
+    "terminal-sessions-remote": {
+      "command": "terminal-sessions-mcp",
+      "env": {
+        "SESSION_SERVER_URL": "ws://192.168.1.100:3100",
+        "SESSION_SERVER_TOKEN": "mysecrettoken"
+      }
+    }
+  }
+}
+```
+
+You can configure multiple MCP servers to connect to different machines simultaneously.
 
 ## Troubleshooting
 
