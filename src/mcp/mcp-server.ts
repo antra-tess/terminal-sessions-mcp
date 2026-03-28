@@ -6,6 +6,7 @@
 
 import { RobustSessionClient } from '../client/websocket-client';
 import { cleanTerminalOutput, cleanLogLines, CleanOptions } from '../utils/ansi-clean';
+import type { WatchManager, WatchInfo } from '../mcpl/watch-manager';
 
 interface ServiceConfig {
   name: string;
@@ -38,13 +39,29 @@ export class ConnectomeTestingMCP {
   private apiUrl: string;
   private authToken?: string;
   private serviceMap = new Map<string, string>(); // name -> sessionId
-  
+
+  /** MCPL callback — fired when a session is created (nullable, zero overhead when MCPL off) */
+  onSessionCreated?: (sessionId: string, name?: string) => void;
+  /** MCPL callback — fired when a session exits or is killed (nullable, zero overhead when MCPL off) */
+  onSessionExited?: (sessionId: string) => void;
+
+  /** Watch manager for dynamic output watches (nullable, zero overhead when not set) */
+  private watchManager: WatchManager | null = null;
+
+  setWatchManager(wm: WatchManager): void {
+    this.watchManager = wm;
+  }
+
   constructor(apiUrl: string = 'ws://localhost:3100', authToken?: string) {
     this.apiUrl = apiUrl;
     this.authToken = authToken;
   }
-  
-  private getClient(): RobustSessionClient {
+
+  /**
+   * Get or create the underlying WebSocket client.
+   * Exposed for MCPL channel manager to subscribe to session events.
+   */
+  getClient(): RobustSessionClient {
     if (!this.client) {
       this.client = new RobustSessionClient(this.apiUrl, this.authToken);
     }
@@ -93,8 +110,9 @@ export class ConnectomeTestingMCP {
       
       if (result.sessionId) {
         this.serviceMap.set(config.name, result.sessionId);
+        this.onSessionCreated?.(result.sessionId, config.name);
       }
-      
+
       // Format response for readability, clean logs unless raw mode
       return {
         status: result.status,
@@ -240,7 +258,7 @@ export class ConnectomeTestingMCP {
     
     try {
       await this.getClient().request('session.kill', { sessionId, graceful: params.graceful });
-      
+
       // Remove from service map
       for (const [name, id] of Array.from(this.serviceMap.entries())) {
         if (id === sessionId) {
@@ -248,11 +266,13 @@ export class ConnectomeTestingMCP {
           break;
         }
       }
-      
-      return { 
+
+      this.onSessionExited?.(sessionId);
+
+      return {
         success: true,
-        message: params.graceful === false 
-          ? 'Session forcefully terminated' 
+        message: params.graceful === false
+          ? 'Session forcefully terminated'
           : 'Session terminated gracefully'
       };
     } catch (error) {
@@ -272,7 +292,9 @@ export class ConnectomeTestingMCP {
     sessionId: string;
     info: any;
   }> {
-    return await this.getClient().createSession(params);
+    const result = await this.getClient().createSession(params);
+    this.onSessionCreated?.(params.id);
+    return result;
   }
   
   /**
@@ -344,12 +366,17 @@ export class ConnectomeTestingMCP {
     graceful?: boolean;
   }): Promise<{ success: boolean; message?: string }> {
     try {
+      // Notify MCPL of each session being removed before clearing
+      for (const sessionId of this.serviceMap.values()) {
+        this.onSessionExited?.(sessionId);
+      }
+
       await this.getClient().killAll(params?.graceful);
       this.serviceMap.clear();
-      return { 
+      return {
         success: true,
-        message: params?.graceful === false 
-          ? 'All sessions forcefully terminated' 
+        message: params?.graceful === false
+          ? 'All sessions forcefully terminated'
           : 'All sessions terminated gracefully'
       };
     } catch (error) {
@@ -450,6 +477,75 @@ export class ConnectomeTestingMCP {
     }
   }
   
+  /**
+   * Add a dynamic pattern watch — triggers inference when regex matches session output.
+   * @tool
+   */
+  watchPattern(params: {
+    session: string;
+    pattern: string;
+    label?: string;
+    once?: boolean;
+  }): { watchId: string } {
+    if (!this.watchManager) {
+      throw new Error('Watch manager not available (MCPL not enabled)');
+    }
+    const sessionId = this.serviceMap.get(params.session) || params.session;
+    return this.watchManager.addPatternWatch({
+      sessionId,
+      pattern: params.pattern,
+      label: params.label,
+      once: params.once,
+    });
+  }
+
+  /**
+   * Add a dynamic halt watch — triggers inference after N seconds of silence.
+   * @tool
+   */
+  watchHalt(params: {
+    session: string;
+    durationSeconds: number;
+    label?: string;
+    once?: boolean;
+  }): { watchId: string } {
+    if (!this.watchManager) {
+      throw new Error('Watch manager not available (MCPL not enabled)');
+    }
+    const sessionId = this.serviceMap.get(params.session) || params.session;
+    return this.watchManager.addHaltWatch({
+      sessionId,
+      durationSeconds: params.durationSeconds,
+      label: params.label,
+      once: params.once,
+    });
+  }
+
+  /**
+   * Remove a watch by ID.
+   * @tool
+   */
+  removeWatch(params: { watchId: string }): { removed: boolean } {
+    if (!this.watchManager) {
+      throw new Error('Watch manager not available (MCPL not enabled)');
+    }
+    return this.watchManager.removeWatch(params.watchId);
+  }
+
+  /**
+   * List active watches, optionally filtered by session.
+   * @tool
+   */
+  listWatches(params?: { session?: string }): WatchInfo[] {
+    if (!this.watchManager) {
+      throw new Error('Watch manager not available (MCPL not enabled)');
+    }
+    const sessionId = params?.session
+      ? (this.serviceMap.get(params.session) || params.session)
+      : undefined;
+    return this.watchManager.listWatches(sessionId);
+  }
+
   /**
    * Wait for a pattern to appear in logs
    * @tool

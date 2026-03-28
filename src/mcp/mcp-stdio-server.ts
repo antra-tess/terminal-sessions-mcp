@@ -2,12 +2,32 @@
 
 /**
  * Minimal MCP Server Implementation for Terminal Sessions MCP
- * 
+ *
  * Implements just enough of the MCP protocol to work with Cursor
+ * With optional MCPL (MCP Live) support for real-time terminal output,
+ * context injection, and bidirectional channel communication.
  */
 
 import * as readline from 'readline';
 import { ConnectomeTestingMCP } from './mcp-server';
+import { McplClient } from '../mcpl/client';
+import { McplDispatcher } from '../mcpl/dispatcher';
+import { ChannelManager } from '../mcpl/channels';
+import { ContextProvider } from '../mcpl/context';
+import { WatchManager } from '../mcpl/watch-manager';
+import { buildServerCapabilities } from '../mcpl/feature-sets';
+import { McplMethod } from '../mcpl/types';
+import type {
+  JsonRpcRequest,
+  JsonRpcResponse,
+  ChannelsOpenParams,
+  ChannelsCloseParams,
+  ChannelsPublishParams,
+  BeforeInferenceParams,
+} from '../mcpl/types';
+
+// MCPL toggle — default enabled
+const MCPL_ENABLED = process.env.MCPL_ENABLED !== 'false';
 
 // Create readline interface for stdio communication
 const rl = readline.createInterface({
@@ -19,17 +39,23 @@ const rl = readline.createInterface({
 // Initialize our MCP wrapper (lazy - connection will be established on first use)
 let mcp: ConnectomeTestingMCP | null = null;
 
+// MCPL modules (created upfront, wired after handshake)
+const mcplClient = MCPL_ENABLED ? new McplClient() : null;
+const dispatcher = MCPL_ENABLED ? new McplDispatcher() : null;
+let channelManager: ChannelManager | null = null;
+let contextProvider: ContextProvider | null = null;
+
 function getMCP() {
   if (!mcp) {
     // Support full URL, or host+port separately
     const token = process.env.SESSION_SERVER_TOKEN;
     const url = process.env.SESSION_SERVER_URL;
-    
+
     // Always log connection info for debugging
     console.error(`[MCP] SESSION_SERVER_URL env: ${url || '(not set)'}`);
     console.error(`[MCP] SESSION_SERVER_PORT env: ${process.env.SESSION_SERVER_PORT || '(not set)'}`);
     console.error(`[MCP] SESSION_SERVER_HOST env: ${process.env.SESSION_SERVER_HOST || '(not set)'}`);
-    
+
     if (url) {
       console.error(`[MCP] Using URL: ${url}`);
       mcp = new ConnectomeTestingMCP(url, token);
@@ -163,6 +189,51 @@ const TOOLS = {
       },
       required: ['session']
     }
+  },
+  watchPattern: {
+    description: 'Watch for a regex pattern in session output. When matched, triggers inference so the agent wakes up. Requires MCPL.',
+    parameters: {
+      type: 'object',
+      properties: {
+        session: { type: 'string', description: 'Session name or ID to watch' },
+        pattern: { type: 'string', description: 'Regex pattern to match against output lines' },
+        label: { type: 'string', description: 'Optional label for this watch (shown when triggered)' },
+        once: { type: 'boolean', description: 'If true, auto-remove after first match (default: false)' }
+      },
+      required: ['session', 'pattern']
+    }
+  },
+  watchHalt: {
+    description: 'Watch for output silence on a session. Triggers inference after N seconds of no output. Requires MCPL.',
+    parameters: {
+      type: 'object',
+      properties: {
+        session: { type: 'string', description: 'Session name or ID to watch' },
+        durationSeconds: { type: 'number', description: 'Seconds of silence before triggering' },
+        label: { type: 'string', description: 'Optional label for this watch (shown when triggered)' },
+        once: { type: 'boolean', description: 'If true, auto-remove after first fire (default: true)' }
+      },
+      required: ['session', 'durationSeconds']
+    }
+  },
+  removeWatch: {
+    description: 'Remove a watch by its ID. Requires MCPL.',
+    parameters: {
+      type: 'object',
+      properties: {
+        watchId: { type: 'string', description: 'The watch ID to remove' }
+      },
+      required: ['watchId']
+    }
+  },
+  listWatches: {
+    description: 'List all active watches, optionally filtered by session. Requires MCPL.',
+    parameters: {
+      type: 'object',
+      properties: {
+        session: { type: 'string', description: 'Optional session name or ID to filter by' }
+      }
+    }
   }
 };
 
@@ -174,29 +245,108 @@ function sendResponse(id: string | number, result?: any, error?: any) {
     ...(error ? { error } : { result })
   };
   const output = JSON.stringify(response);
-  
+
   // Debug: log what we're sending
   if (process.env.MCP_DEBUG) {
     console.error('[SEND]', output);
   }
-  
+
   console.log(output);
+}
+
+/**
+ * Wire MCPL handlers after the initialize handshake completes.
+ * Creates ChannelManager and ContextProvider, registers dispatcher handlers,
+ * and subscribes to session events for real-time output.
+ */
+function initMcplAfterHandshake(): void {
+  if (!mcplClient || !dispatcher) return;
+
+  const mcpInstance = getMCP();
+  const wsClient = mcpInstance.getClient();
+
+  // Create watch manager for dynamic output watches
+  const watchManager = new WatchManager();
+
+  // Create channel manager
+  channelManager = new ChannelManager(mcplClient, wsClient);
+  channelManager.setWatchManager(watchManager);
+
+  // Wire watch manager into MCP instance for tool dispatch
+  mcpInstance.setWatchManager(watchManager);
+
+  // Create context provider
+  contextProvider = new ContextProvider(channelManager, wsClient);
+
+  // Register MCPL method handlers
+  dispatcher.register(McplMethod.ChannelsList, () => {
+    return channelManager!.listChannels();
+  });
+
+  dispatcher.register(McplMethod.ChannelsOpen, (params) => {
+    return channelManager!.openChannel(params as unknown as ChannelsOpenParams);
+  });
+
+  dispatcher.register(McplMethod.ChannelsClose, (params) => {
+    return channelManager!.closeChannel(params as unknown as ChannelsCloseParams);
+  });
+
+  dispatcher.register(McplMethod.ChannelsPublish, async (params) => {
+    return channelManager!.publish(params as unknown as ChannelsPublishParams);
+  });
+
+  dispatcher.register(McplMethod.BeforeInference, async (params) => {
+    return contextProvider!.handleBeforeInference(params as unknown as BeforeInferenceParams);
+  });
+
+  // Wire session lifecycle callbacks into the MCP instance
+  mcpInstance.onSessionCreated = (sessionId: string, name?: string) => {
+    channelManager?.onSessionCreated(sessionId, name);
+  };
+
+  mcpInstance.onSessionExited = (sessionId: string) => {
+    channelManager?.onSessionExited(sessionId);
+  };
+
+  // Register existing sessions and subscribe to real-time output
+  channelManager.registerExistingSessions().catch(err => {
+    console.error('[MCPL] Error registering existing sessions:', err);
+  });
+
+  channelManager.subscribeToOutput();
+
+  console.error('[MCPL] Initialized — channels, context, and event wiring active');
 }
 
 // Handle incoming messages
 rl.on('line', async (line) => {
   let messageId: string | number | undefined;
-  
+
   try {
     const message = JSON.parse(line);
     const { id, method, params } = message;
     messageId = id;
-    
+
     // Log to stderr for debugging
     if (process.env.MCP_DEBUG) {
       console.error('Received:', method, 'id:', id, 'params:', params);
     }
-    
+
+    // MCPL: check for responses to our outbound requests (has id, no method)
+    if (MCPL_ENABLED && mcplClient && id !== undefined && !method) {
+      mcplClient.handleResponse(message as JsonRpcResponse);
+      return;
+    }
+
+    // MCPL: check for MCPL methods and route to dispatcher
+    if (MCPL_ENABLED && dispatcher && method && dispatcher.handles(method)) {
+      const response = await dispatcher.dispatch(message as JsonRpcRequest);
+      if (response) {
+        sendResponse(response.id, response.result, response.error);
+      }
+      return;
+    }
+
     // Handle notifications (messages without id) - these don't need responses
     if (id === undefined || id === null) {
       if (process.env.MCP_DEBUG) {
@@ -204,21 +354,27 @@ rl.on('line', async (line) => {
       }
       return;
     }
-    
+
     switch (method) {
       case 'initialize':
         sendResponse(id, {
           protocolVersion: '2025-06-18',
           capabilities: {
-            tools: {}
+            tools: {},
+            ...(MCPL_ENABLED ? { experimental: { mcpl: buildServerCapabilities() } } : {}),
           },
           serverInfo: {
             name: 'terminal-sessions-mcp',
             version: '1.0.0'
           }
         });
+
+        // After handshake, wire MCPL events
+        if (MCPL_ENABLED) {
+          initMcplAfterHandshake();
+        }
         break;
-        
+
       case 'tools/list':
         sendResponse(id, {
           tools: Object.entries(TOOLS).map(([name, def]) => ({
@@ -228,12 +384,12 @@ rl.on('line', async (line) => {
           }))
         });
         break;
-        
+
       case 'tools/call':
         try {
           const { name, arguments: args } = params;
           let result;
-          
+
           // Call the appropriate method
           const mcpInstance = getMCP();
           switch (name) {
@@ -267,16 +423,28 @@ rl.on('line', async (line) => {
             case 'takeScreenshot':
               result = await mcpInstance.takeScreenshot(args);
               break;
+            case 'watchPattern':
+              result = mcpInstance.watchPattern(args);
+              break;
+            case 'watchHalt':
+              result = mcpInstance.watchHalt(args);
+              break;
+            case 'removeWatch':
+              result = mcpInstance.removeWatch(args);
+              break;
+            case 'listWatches':
+              result = mcpInstance.listWatches(args);
+              break;
             default:
               throw new Error(`Unknown tool: ${name}`);
           }
-          
+
           // Special handling for screenshot - return image content
-          if (name === 'takeScreenshot' && 
-              typeof result === 'object' && 
-              result !== null && 
-              'success' in result && 
-              result.success && 
+          if (name === 'takeScreenshot' &&
+              typeof result === 'object' &&
+              result !== null &&
+              'success' in result &&
+              result.success &&
               'base64' in result) {
             sendResponse(id, {
               content: [
@@ -306,7 +474,7 @@ rl.on('line', async (line) => {
           });
         }
         break;
-        
+
       default:
         sendResponse(id, null, {
           code: -32601,
@@ -328,9 +496,13 @@ rl.on('line', async (line) => {
 // Minimal startup - don't pollute stderr unless debugging
 if (process.env.MCP_DEBUG) {
   console.error('Terminal Sessions MCP Server started');
-  const url = process.env.SESSION_SERVER_URL || 
+  const url = process.env.SESSION_SERVER_URL ||
     `ws://${process.env.SESSION_SERVER_HOST || 'localhost'}:${process.env.SESSION_SERVER_PORT || '3100'}`;
   console.error(`Connecting to session server at: ${url}`);
+}
+
+if (MCPL_ENABLED) {
+  console.error('[MCPL] MCPL support enabled');
 }
 
 // Keep process alive
@@ -338,6 +510,7 @@ process.stdin.resume();
 
 // Handle graceful shutdown
 process.on('SIGINT', () => {
+  channelManager?.destroy();
   if (mcp) {
     // Close WebSocket connection if it exists
     process.exit(0);
@@ -345,6 +518,7 @@ process.on('SIGINT', () => {
 });
 
 process.on('SIGTERM', () => {
+  channelManager?.destroy();
   if (mcp) {
     // Close WebSocket connection if it exists
     process.exit(0);
