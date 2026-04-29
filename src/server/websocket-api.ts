@@ -66,6 +66,9 @@ export class SessionAPI {
     this.registerServerListener('session:signal', (payload) => {
       this.pushEvent('session:signal', payload, payload.sessionId);
     });
+    this.registerServerListener('session:cwd', (payload) => {
+      this.pushEvent('session:cwd', payload, payload.sessionId);
+    });
     
     // Create HTTP server
     this.httpServer = createServer((req, res) => {

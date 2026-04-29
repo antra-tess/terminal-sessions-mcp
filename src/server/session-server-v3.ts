@@ -15,6 +15,35 @@ import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import * as path from 'path';
 
+// node-pty prebuilds may ship spawn-helper without the execute bit (macOS)
+function ensureSpawnHelperExecutable(): void {
+  if (process.platform === 'win32') return;
+  try {
+    const ptyMain = require.resolve('node-pty');
+    const ptyDir = path.dirname(ptyMain);
+    const platform = `${process.platform}-${process.arch}`;
+    const candidates = [
+      path.join(ptyDir, 'prebuilds', platform, 'spawn-helper'),
+      path.join(ptyDir, 'build', 'Release', 'spawn-helper'),
+    ];
+    for (const helper of candidates) {
+      try {
+        const stat = fs.statSync(helper);
+        if (!(stat.mode & 0o111)) {
+          fs.chmodSync(helper, 0o755);
+        }
+      } catch {
+        // This candidate doesn't exist
+      }
+    }
+  } catch {
+    // Best-effort — if we can't find or fix the helper, let pty.spawn
+    // surface the original error so the user gets actionable diagnostics.
+  }
+}
+
+ensureSpawnHelperExecutable();
+
 interface SessionInfo {
   id: string;
   name: string;
@@ -109,6 +138,11 @@ type SessionEventMap = {
     signal: string;
     timestamp: Date;
   };
+  'session:cwd': {
+    sessionId: string;
+    cwd: string;
+    timestamp: Date;
+  };
 };
 
 export class PersistentSessionServer extends EventEmitter {
@@ -138,7 +172,11 @@ export class PersistentSessionServer extends EventEmitter {
     }
 
     const shell = options.shell || (process.platform === 'win32' ? 'wsl.exe' : '/bin/bash');
-    const cwd = options.cwd || process.cwd();
+    const home = process.env.HOME || process.env.USERPROFILE || process.cwd();
+    let cwd = options.cwd || home;
+    if (!path.isAbsolute(cwd)) {
+      cwd = path.join(home, cwd);
+    }
     const env = { ...process.env, ...options.env };
 
     // For WSL, we need to tell it to run bash in Ubuntu specifically
@@ -215,6 +253,9 @@ export class PersistentSessionServer extends EventEmitter {
         });
       }
 
+      // Parse OSC 7 directory-tracking sequences emitted by the shell
+      this.parseOsc7(sessionInfo, data);
+
       // Check if we're done with current command
       this.checkCommandCompletion(sessionInfo);
     });
@@ -260,8 +301,10 @@ export class PersistentSessionServer extends EventEmitter {
     if (!isWindows) {
       // Minimal setup - just ensure a clean environment
       session.shell.write('export TERM=xterm-256color\n');
+      // Emit OSC 7 on every prompt so the server can track cwd
+      session.shell.write('PROMPT_COMMAND=\'printf "\\033]7;file://%s%s\\033\\\\\\\\" "$HOSTNAME" "$PWD"\'\n');
       await this.sleep(200); // Give shell time to initialize
-      
+
       // Clear any initial output/warnings
       session.outputBuffer = '';
       session.logs = [];
@@ -593,6 +636,7 @@ export class PersistentSessionServer extends EventEmitter {
     return Array.from(this.sessions.entries()).map(([id, session]) => ({
       id,
       name: session.name,
+      cwd: session.cwd,
       isAlive: session.isAlive,
       createdAt: session.createdAt,
       lastActivity: session.lastActivity,
@@ -802,6 +846,22 @@ export class PersistentSessionServer extends EventEmitter {
       }
     } catch (error: any) {
       return { success: false, error: `Failed to screenshot via GUI: ${error.message}` };
+    }
+  }
+
+  private parseOsc7(session: SessionInfo, data: string): void {
+    // OSC 7 format: \x1b]7;file://hostname/path\x07  or  \x1b]7;file://hostname/path\x1b\\
+    const match = data.match(/\x1b\]7;file:\/\/[^/]*([^\x07\x1b]*?)(?:\x07|\x1b\\)/);
+    if (match) {
+      const newCwd = decodeURIComponent(match[1]);
+      if (newCwd && newCwd !== session.cwd) {
+        session.cwd = newCwd;
+        this.notify('session:cwd', {
+          sessionId: session.id,
+          cwd: newCwd,
+          timestamp: new Date()
+        });
+      }
     }
   }
 
