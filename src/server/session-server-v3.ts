@@ -13,6 +13,7 @@ import * as pty from 'node-pty';
 import { IPty } from 'node-pty';
 import { EventEmitter } from 'events';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 
 interface SessionInfo {
@@ -40,6 +41,7 @@ interface SessionInfo {
     timeout: number;
   };
   lineBuffer: string; // Buffer for incomplete lines
+  tempFiles: string[]; // Temp files backing multi-line commands, cleaned up lazily
 }
 
 interface CommandResult {
@@ -118,6 +120,7 @@ export class PersistentSessionServer extends EventEmitter {
   private readonly defaultCommandTimeout = 30000; // 30 seconds default
   private readonly exitCodeMarker = '<<<EXIT:';
   private readonly exitCodeEnd = '>>>';
+  private tempFileCounter = 0;
 
   constructor() {
     super();
@@ -166,7 +169,8 @@ export class PersistentSessionServer extends EventEmitter {
       outputBuffer: '',
       isProcessingCommand: false,
       commandQueue: [],
-      lineBuffer: ''
+      lineBuffer: '',
+      tempFiles: []
     };
 
     // Handle output
@@ -312,6 +316,10 @@ export class PersistentSessionServer extends EventEmitter {
     const currentCommand = session.commandQueue.shift()!;
     session.currentCommand = currentCommand;
 
+    // Any temp files from previously-issued commands are safe to remove now:
+    // a new command means the shell has finished sourcing the prior one.
+    this.cleanupTempFiles(session);
+
     // Clear output buffer
     session.outputBuffer = '';
 
@@ -324,8 +332,22 @@ export class PersistentSessionServer extends EventEmitter {
       startedAt: new Date(currentCommand.startTime)
     });
 
-    // Write the command followed by an exit-code marker so we can detect completion
-    session.shell.write(currentCommand.command + '\n');
+    // Write the command followed by an exit-code marker so we can detect completion.
+    //
+    // Multi-line payloads (e.g. heredocs) must NOT be streamed into the
+    // interactive PTY as if typed: the shell's line editor (readline) echoes
+    // and redraws as it ingests each fragment, emitting CSI insert-character
+    // (ESC[1@) runs that race the inbound bytes and transpose the text
+    // (see issue #3). Instead, write the body to a temp file out-of-band and
+    // source it — a single, side-effect-free line for the line editor. Using
+    // `source` (not `bash <file>`) preserves cwd/env persistence and keeps the
+    // `$?` marker meaningful; the approach is shell-agnostic (works on the
+    // default macOS bash 3.2, which has no bracketed-paste support).
+    if (currentCommand.command.includes('\n')) {
+      session.shell.write(this.writeCommandViaTempFile(session, currentCommand.command) + '\n');
+    } else {
+      session.shell.write(currentCommand.command + '\n');
+    }
     // Small delay to ensure the command starts before we write the marker echo
     setTimeout(() => {
       if (session.isAlive && session.currentCommand === currentCommand) {
@@ -356,6 +378,10 @@ export class PersistentSessionServer extends EventEmitter {
     }
 
     session.isProcessingCommand = false;
+
+    // Surface (rather than silently strip) any sign that the line editor
+    // mangled the input — otherwise ANSI cleaning can hide a corrupt write.
+    this.warnIfInputCorrupted(session);
 
     // Clean output: remove the marker line and the echo command itself
     const markerRegex = new RegExp(
@@ -407,6 +433,58 @@ export class PersistentSessionServer extends EventEmitter {
 
     const exitCode = parseInt(match[1], 10);
     this.resolveCommand(session, exitCode);
+  }
+
+  /**
+   * Persist a multi-line command body to a temp file and return the single-line
+   * shell command that runs it in the current shell (preserving cwd/env).
+   * The file is tracked on the session and cleaned up lazily.
+   */
+  private writeCommandViaTempFile(session: SessionInfo, command: string): string {
+    const file = path.join(
+      os.tmpdir(),
+      `term-sessions-cmd-${process.pid}-${++this.tempFileCounter}.sh`
+    );
+    // Trailing newline so the final line is terminated even if the caller omitted it.
+    fs.writeFileSync(file, command.endsWith('\n') ? command : command + '\n', { mode: 0o600 });
+    session.tempFiles.push(file);
+    // `source` keeps execution in the interactive shell so env/cwd changes persist.
+    // Single-quote the path to be safe against unusual tmpdir characters.
+    return `source '${file.replace(/'/g, `'\\''`)}'`;
+  }
+
+  /**
+   * Remove temp files backing already-issued commands. Safe to call between
+   * commands: serialized execution guarantees the shell has finished sourcing.
+   */
+  private cleanupTempFiles(session: SessionInfo): void {
+    if (session.tempFiles.length === 0) return;
+    for (const file of session.tempFiles) {
+      try {
+        fs.unlinkSync(file);
+      } catch {
+        // Best-effort: file may already be gone, or tmpdir cleaned by the OS.
+      }
+    }
+    session.tempFiles = [];
+  }
+
+  /**
+   * Detect the line-editor corruption signature (runs of CSI insert/delete
+   * character — ESC[<n>@ / ESC[<n>P) in the raw output and log a warning, so a
+   * mangled write is observable rather than hidden by downstream ANSI cleaning.
+   */
+  private warnIfInputCorrupted(session: SessionInfo): void {
+    const insertCharRuns = (session.outputBuffer.match(/\x1b\[[0-9]*[@P]/g) || []).length;
+    // A couple of these can occur from benign redraws; a run of them is the
+    // hallmark of the paste-corruption bug.
+    if (insertCharRuns >= 5) {
+      this.addLog(
+        session,
+        `[warning] detected ${insertCharRuns} CSI insert/delete-char sequences in output — ` +
+        `possible input corruption from the terminal line editor`
+      );
+    }
   }
 
   /**
@@ -649,6 +727,7 @@ export class PersistentSessionServer extends EventEmitter {
     
     // Wait a bit to ensure the process has fully terminated
     await this.sleep(100);
+    this.cleanupTempFiles(session);
     this.sessions.delete(sessionId);
   }
 
