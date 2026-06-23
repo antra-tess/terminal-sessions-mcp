@@ -5,11 +5,33 @@ let currentTerminal = null;
 let currentSession = null;
 const sessions = new Map();
 
+// Settings helpers
+function getSetting(key, defaultValue) {
+  try {
+    const v = localStorage.getItem('ts_' + key);
+    return v === null ? defaultValue : JSON.parse(v);
+  } catch { return defaultValue; }
+}
+function saveSetting(key, value) {
+  localStorage.setItem('ts_' + key, JSON.stringify(value));
+}
+function toggleSettings() {
+  const panel = document.getElementById('settings-panel');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+}
+function shortenPath(p) {
+  const home = '/Users/' + (p.split('/')[2] || '');
+  if (p === home) return '~';
+  if (p.startsWith(home + '/')) return '~/' + p.slice(home.length + 1);
+  return p;
+}
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('setting-show-cwd').checked = getSetting('showCwd', true);
   loadSessions();
   setupSocketListeners();
-  
+
   // Refresh sessions every 5 seconds
   setInterval(loadSessions, 5000);
 });
@@ -33,12 +55,14 @@ async function loadSessions() {
     });
     
     // Render sessions
+    const showCwd = getSetting('showCwd', true);
     container.innerHTML = sessionsList.map(session => `
-      <div class="session-item ${currentSession === session.id ? 'active' : ''}" 
+      <div class="session-item ${currentSession === session.id ? 'active' : ''}"
            onclick="selectSession('${session.id}', event)">
         <div class="session-name">${session.id}</div>
+        ${showCwd && session.cwd ? `<div class="session-cwd" title="${session.cwd}">${shortenPath(session.cwd)}</div>` : ''}
         <div class="session-info">
-          ${session.isAlive ? '🟢' : '🔴'} 
+          ${session.isAlive ? '🟢' : '🔴'}
           ${session.logSize || 0} lines
         </div>
       </div>
@@ -88,9 +112,11 @@ async function createTerminalView(sessionId) {
   }
   
   // Create new terminal UI
+  const sessionData = sessions.get(sessionId);
+  const cwdLabel = sessionData?.cwd ? `  —  ${shortenPath(sessionData.cwd)}` : '';
   content.innerHTML = `
     <div class="terminal-header">
-      <div class="terminal-title">Session: ${sessionId}</div>
+      <div class="terminal-title">Session: ${sessionId}${cwdLabel}</div>
       <div class="terminal-actions">
         <div class="signal-buttons">
           <button class="signal danger" onclick="sendSignal('SIGINT')" title="Ctrl+C">^C</button>
@@ -232,12 +258,25 @@ function setupSocketListeners() {
   socket.on('session:created', () => {
     loadSessions();
   });
-  
+
   socket.on('session:exit', (data) => {
     loadSessions();
     if (currentSession === data.sessionId) {
       currentTerminal?.writeln('\x1b[33m\n[Session ended]\x1b[0m');
     }
+  });
+
+  socket.on('session:cwd', (data) => {
+    // Update cached session data
+    const s = sessions.get(data.sessionId);
+    if (s) s.cwd = data.cwd;
+    // Update terminal header if this is the active session
+    if (currentSession === data.sessionId) {
+      const titleEl = document.querySelector('.terminal-title');
+      if (titleEl) titleEl.textContent = `Session: ${data.sessionId}  —  ${shortenPath(data.cwd)}`;
+    }
+    // Update sidebar
+    loadSessions();
   });
   
   socket.on('exec-result', (result) => {

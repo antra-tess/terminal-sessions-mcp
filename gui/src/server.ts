@@ -239,6 +239,8 @@ export class WebGUIServer {
         this.io.emit('session:created', payload);
       } else if (event === 'session:exit') {
         this.io.emit('session:exit', payload);
+      } else if (event === 'session:cwd') {
+        this.io.emit('session:cwd', payload);
       }
     });
   }

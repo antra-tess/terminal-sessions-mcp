@@ -11,6 +11,7 @@
     "session-cli": "./dist/cli/session-cli.js"
   },
   "scripts": {
+    "postinstall": "node scripts/fix-pty-permissions.js",
     "build": "tsc",
     "dev": "tsc --watch",
     "start": "node dist/src/server/start-session-server.js",
