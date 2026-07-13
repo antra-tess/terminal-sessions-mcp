@@ -351,7 +351,7 @@ export class PersistentSessionServer extends EventEmitter {
     // `source` (not `bash <file>`) preserves cwd/env persistence and keeps the
     // `$?` marker meaningful; the approach is shell-agnostic (works on the
     // default macOS bash 3.2, which has no bracketed-paste support).
-    if (currentCommand.command.includes('\n')) {
+    if (currentCommand.command.includes('\n') || currentCommand.command.length > 100) {
       session.shell.write(this.writeCommandViaTempFile(session, currentCommand.command) + '\n');
     } else {
       session.shell.write(currentCommand.command + '\n');
