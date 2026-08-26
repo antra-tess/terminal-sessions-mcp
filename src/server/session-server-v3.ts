@@ -29,20 +29,19 @@ interface SessionInfo {
   lastActivity: Date;
   outputBuffer: string;
   isProcessingCommand: boolean;
-  commandQueue: Array<{
-    command: string;
-    resolve: (result: CommandResult) => void;
-    startTime: number;
-    timeout: number;
-  }>;
-  currentCommand?: {
-    command: string;
-    resolve: (result: CommandResult) => void;
-    startTime: number;
-    timeout: number;
-  };
+  commandQueue: Array<QueuedCommand>;
+  currentCommand?: QueuedCommand;
+  currentTimeout?: NodeJS.Timeout;
   lineBuffer: string; // Buffer for incomplete lines
-  tempFiles: string[]; // Temp files backing multi-line commands, cleaned up lazily
+  tempFiles: string[]; // Temp files backing in-flight commands, cleaned up lazily
+}
+
+interface QueuedCommand {
+  command: string;
+  resolve: (result: CommandResult) => void;
+  startTime: number;
+  timeout: number;
+  nonce: string;
 }
 
 interface CommandResult {
@@ -122,6 +121,9 @@ export class PersistentSessionServer extends EventEmitter {
   private readonly defaultCommandTimeout = 30000; // 30 seconds default
   private readonly exitCodeMarker = '<<<EXIT:';
   private readonly exitCodeEnd = '>>>';
+  // Matches a RESOLVED marker (nonce + numeric exit code), never the echoed
+  // command text, which contains the literal `$?` instead of digits.
+  private readonly resolvedMarkerRegex = /<<<EXIT:([0-9a-z]+):(\d+)>>>/;
   private tempFileCounter = 0;
 
   /**
@@ -201,10 +203,13 @@ export class PersistentSessionServer extends EventEmitter {
       const segments = sessionInfo.lineBuffer.split(/\r?\n/);
       const completedLines: string[] = [];
       
-      // All but the last element are complete lines
+      // All but the last element are complete lines. Internal plumbing lines
+      // (the echoed `. '<tempfile>'; echo ...` wrapper and resolved markers)
+      // are kept out of the logs — the command itself is already logged as
+      // `$ <command>` when it is issued.
       for (let i = 0; i < segments.length - 1; i++) {
         const line = segments[i];
-        if (line.length > 0) {
+        if (line.length > 0 && !this.isInternalPlumbingLine(line)) {
           this.addLog(sessionInfo, line);
           completedLines.push(line);
         }
@@ -228,20 +233,29 @@ export class PersistentSessionServer extends EventEmitter {
       }
 
       // Check if we're done with current command
-      this.checkCommandCompletion(sessionInfo);
+      this.checkCommandCompletion(sessionInfo, data);
     });
 
     // Handle exit
     ptyProcess.onExit(({ exitCode }) => {
       sessionInfo.isAlive = false;
-      
+
       // Flush any remaining buffered line
       if (sessionInfo.lineBuffer.length > 0) {
         this.addLog(sessionInfo, sessionInfo.lineBuffer);
         sessionInfo.lineBuffer = '';
       }
-      
+
       this.addLog(sessionInfo, `[Session terminated with code ${exitCode}]`);
+
+      // A dying shell can never echo the completion marker, so resolve the
+      // in-flight command instead of letting callers hang until their
+      // fallback timeout (e.g. exec("exit")). Queued commands drain via
+      // processCommandQueue, which refuses to write to a dead PTY.
+      if (sessionInfo.currentCommand) {
+        this.resolveCommand(sessionInfo, exitCode ?? -1);
+      }
+
       this.notify('session:exit', {
         sessionId: sessionInfo.id,
         exitCode,
@@ -268,12 +282,12 @@ export class PersistentSessionServer extends EventEmitter {
   private async initializeShell(session: SessionInfo): Promise<void> {
     // Just set basic environment, no custom prompts
     const isWindows = process.platform === 'win32';
-    
+
     if (!isWindows) {
       // Minimal setup - just ensure a clean environment
       session.shell.write('export TERM=xterm-256color\n');
       await this.sleep(200); // Give shell time to initialize
-      
+
       // Clear any initial output/warnings
       session.outputBuffer = '';
       session.logs = [];
@@ -302,7 +316,8 @@ export class PersistentSessionServer extends EventEmitter {
         command,
         resolve,
         startTime,
-        timeout: timeout ?? this.defaultCommandTimeout
+        timeout: timeout ?? this.defaultCommandTimeout,
+        nonce: `${(++this.tempFileCounter).toString(36)}${Math.random().toString(36).slice(2, 8)}`
       });
 
       // Process queue if not already processing
@@ -317,6 +332,20 @@ export class PersistentSessionServer extends EventEmitter {
    */
   private async processCommandQueue(session: SessionInfo): Promise<void> {
     if (session.commandQueue.length === 0 || session.isProcessingCommand) {
+      return;
+    }
+
+    // A dead PTY can't run anything — fail queued commands instead of writing
+    // into the void and hanging until their timeouts.
+    if (!session.isAlive) {
+      while (session.commandQueue.length > 0) {
+        const queued = session.commandQueue.shift()!;
+        queued.resolve({
+          output: '[session exited before command ran]',
+          exitCode: -1,
+          duration: Date.now() - queued.startTime
+        });
+      }
       return;
     }
 
@@ -340,36 +369,38 @@ export class PersistentSessionServer extends EventEmitter {
       startedAt: new Date(currentCommand.startTime)
     });
 
-    // Write the command followed by an exit-code marker so we can detect completion.
+    // Write the command and its exit-code marker as ONE line:
+    //   . '<tempfile>'; echo "<<<EXIT:<nonce>:$?>>>"
     //
-    // Multi-line payloads (e.g. heredocs) must NOT be streamed into the
-    // interactive PTY as if typed: the shell's line editor (readline) echoes
-    // and redraws as it ingests each fragment, emitting CSI insert-character
-    // (ESC[1@) runs that race the inbound bytes and transpose the text
-    // (see issue #3). Instead, write the body to a temp file out-of-band and
-    // source it — a single, side-effect-free line for the line editor. Using
-    // `source` (not `bash <file>`) preserves cwd/env persistence and keeps the
-    // `$?` marker meaningful; the approach is shell-agnostic (works on the
-    // default macOS bash 3.2, which has no bracketed-paste support).
-    if (currentCommand.command.includes('\n')) {
-      session.shell.write(this.writeCommandViaTempFile(session, currentCommand.command) + '\n');
-    } else {
-      session.shell.write(currentCommand.command + '\n');
-    }
-    // Small delay to ensure the command starts before we write the marker echo
-    setTimeout(() => {
-      if (session.isAlive && session.currentCommand === currentCommand) {
-        session.shell.write(`echo "${this.exitCodeMarker}$?${this.exitCodeEnd}"\n`);
-      }
-    }, 50);
+    // Every command body goes through a temp file (not just multi-line ones —
+    // see issue #3 for the readline paste-corruption rationale; single-line
+    // commands additionally overflow the tty's canonical line buffer, 1024
+    // bytes on macOS). Sourcing with `.` keeps execution in the interactive
+    // shell so cwd/env changes persist and `$?` is the command's exit code.
+    //
+    // Chaining the marker on the same line — instead of typing it into the
+    // PTY after a delay — is what makes completion detection robust:
+    //   - The shell echoes the marker only after the command actually exits,
+    //     so completion is detected at true completion, never early or late.
+    //   - Nothing extra is typed into the PTY while the command runs, so a
+    //     command that reads stdin (read, REPLs, ssh...) can't swallow the
+    //     marker line and force a full-timeout wait.
+    //   - The marker string is SPLIT in the echo command ("<<<EXI""T:...), so
+    //     no echoed/redisplayed copy of the typed line ever contains a
+    //     contiguous marker — only the shell executing the echo produces one.
+    //     (Terminal echo comes back in several forms — tty echo, readline
+    //     redisplay, soft wraps — which no exact-string filter survives.)
+    //   - The per-command nonce means stale markers from a timed-out earlier
+    //     command can't resolve (and corrupt) a later one.
+    session.shell.write(
+      this.writeCommandViaTempFile(session, currentCommand.command) +
+      `; echo "<<<EXI""T:${currentCommand.nonce}:$?${this.exitCodeEnd}"\n`
+    );
 
     // Set up fallback timeout
-    const fallbackTimeout = setTimeout(() => {
+    session.currentTimeout = setTimeout(() => {
       this.resolveCommand(session, -1); // -1 = timed out
     }, currentCommand.timeout);
-
-    // Store timeout so we can clear it on early completion
-    (session as any).currentTimeout = fallbackTimeout;
   }
 
   /**
@@ -380,9 +411,9 @@ export class PersistentSessionServer extends EventEmitter {
     if (!currentCommand) return;
 
     // Clear fallback timeout
-    if ((session as any).currentTimeout) {
-      clearTimeout((session as any).currentTimeout);
-      (session as any).currentTimeout = undefined;
+    if (session.currentTimeout) {
+      clearTimeout(session.currentTimeout);
+      session.currentTimeout = undefined;
     }
 
     session.isProcessingCommand = false;
@@ -391,18 +422,21 @@ export class PersistentSessionServer extends EventEmitter {
     // mangled the input — otherwise ANSI cleaning can hide a corrupt write.
     this.warnIfInputCorrupted(session);
 
-    // Clean output: remove the marker line and the echo command itself
-    const markerRegex = new RegExp(
-      `echo "${this.exitCodeMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\$\\?${this.exitCodeEnd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"\\r?\\n?`,
-      'g'
-    );
-    const exitRegex = new RegExp(
-      `${this.exitCodeMarker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\d+${this.exitCodeEnd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\r?\\n?`,
-      'g'
-    );
-    const cleanOutput = session.outputBuffer
-      .replace(markerRegex, '')
-      .replace(exitRegex, '')
+    // Clean output. The echoed wrapper line marks where the command's real
+    // output begins — everything before it is echo of the typed line plus
+    // bleed-over from the previous prompt, so cut through it when present.
+    // Then strip wrapper fragments (matched separately since soft wraps can
+    // break the echoed line apart) and any resolved markers (any nonce —
+    // stale ones from a previously timed-out command must not leak either).
+    let output = session.outputBuffer;
+    const echoedWrapper = output.match(/echo "<<<EXI""T:[0-9a-z]+:\$\?>>>"\r?\n?/);
+    if (echoedWrapper && echoedWrapper.index !== undefined) {
+      output = output.slice(echoedWrapper.index + echoedWrapper[0].length);
+    }
+    const cleanOutput = output
+      .replace(/\. '[^']*tsm-cmd[^']*';? ?/g, '')
+      .replace(/echo "<<<EXI""T:[0-9a-z]+:\$\?>>>"\r?\n?/g, '')
+      .replace(/<<<EXIT:[0-9a-z]+:\d+>>>\r?\n?/g, '')
       .trim();
 
     const duration = Date.now() - currentCommand.startTime;
@@ -427,38 +461,64 @@ export class PersistentSessionServer extends EventEmitter {
   }
 
   /**
-   * Check if command execution is complete by scanning for the exit-code marker.
-   * Uses a regex to match the resolved marker (digits only) and skip the
-   * echo command itself which contains the literal `$?`.
+   * Check if command execution is complete by scanning for the resolved
+   * exit-code marker belonging to the CURRENT command (matched by nonce, so
+   * stale markers from timed-out commands and marker-shaped output from other
+   * sources are ignored). Only the tail of the buffer around the newest chunk
+   * is scanned — the marker always arrives at the end of a command's output,
+   * and a full-buffer scan per chunk is O(n²) on chatty commands.
    */
-  private checkCommandCompletion(session: SessionInfo): void {
+  private checkCommandCompletion(session: SessionInfo, latestChunk: string): void {
     if (!session.currentCommand) return;
 
-    // Match the resolved marker: <<<EXIT:0>>> or <<<EXIT:127>>> etc.
-    // This skips the echo command line which contains <<<EXIT:$?>>>
-    const match = session.outputBuffer.match(/<<<EXIT:(\d+)>>>/);
-    if (!match) return;
-
-    const exitCode = parseInt(match[1], 10);
-    this.resolveCommand(session, exitCode);
+    // Overlap covers a marker split across chunk boundaries (marker is <48 chars).
+    const scanWindow = session.outputBuffer.slice(-(latestChunk.length + 64));
+    const globalMarker = new RegExp(this.resolvedMarkerRegex.source, 'g');
+    let match: RegExpExecArray | null;
+    while ((match = globalMarker.exec(scanWindow)) !== null) {
+      if (match[1] === session.currentCommand.nonce) {
+        this.resolveCommand(session, parseInt(match[2], 10));
+        return;
+      }
+    }
   }
 
   /**
-   * Persist a multi-line command body to a temp file and return the single-line
-   * shell command that runs it in the current shell (preserving cwd/env).
+   * True for lines that are exec-plumbing rather than command output: the
+   * echoed wrapper command (possibly prefixed by a prompt) and resolved
+   * exit-code markers. These are filtered from logs/output events.
+   */
+  private isInternalPlumbingLine(line: string): boolean {
+    return /\. '[^']*tsm-cmd[^']*'/.test(line) ||
+      /echo "<<<EXI""T:/.test(line) ||
+      this.resolvedMarkerRegex.test(line);
+  }
+
+  /**
+   * Persist a command body to a temp file and return the single-line shell
+   * command that runs it in the current shell (preserving cwd/env).
    * The file is tracked on the session and cleaned up lazily.
    */
   private writeCommandViaTempFile(session: SessionInfo, command: string): string {
+    // Short name: the echoed wrapper line should fit the terminal width when
+    // possible (soft-wrapped echoes are much harder to filter from output).
     const file = path.join(
       os.tmpdir(),
-      `term-sessions-cmd-${process.pid}-${++this.tempFileCounter}.sh`
+      `tsm-cmd-${process.pid}-${++this.tempFileCounter}.sh`
     );
     // Trailing newline so the final line is terminated even if the caller omitted it.
     fs.writeFileSync(file, command.endsWith('\n') ? command : command + '\n', { mode: 0o600 });
     session.tempFiles.push(file);
-    // `source` keeps execution in the interactive shell so env/cwd changes persist.
+    // On Windows the shell is WSL but the temp file lives on the host
+    // filesystem — translate C:\Users\... to /mnt/c/Users/... so the shell
+    // can actually source it.
+    const shellPath = process.platform === 'win32'
+      ? file.replace(/^([A-Za-z]):\\/, (_, drive) => `/mnt/${drive.toLowerCase()}/`).replace(/\\/g, '/')
+      : file;
+    // `.` (POSIX source) keeps execution in the interactive shell so env/cwd
+    // changes persist, and unlike `source` it also works in plain sh/dash.
     // Single-quote the path to be safe against unusual tmpdir characters.
-    return `source '${file.replace(/'/g, `'\\''`)}'`;
+    return `. '${shellPath.replace(/'/g, `'\\''`)}'`;
   }
 
   /**
@@ -723,15 +783,15 @@ export class PersistentSessionServer extends EventEmitter {
       if (graceful) {
         // Send SIGINT for graceful shutdown
         session.shell.kill('SIGINT');
-        
+
         // Wait up to 5 seconds for process to exit gracefully
         const timeout = 3000;
         const startTime = Date.now();
-        
+
         while (session.isAlive && Date.now() - startTime < timeout) {
           await this.sleep(100);
         }
-        
+
         // If still alive after timeout, force kill
         if (session.isAlive) {
           this.addLog(session, '[Process did not exit gracefully, forcing termination]');
@@ -742,7 +802,7 @@ export class PersistentSessionServer extends EventEmitter {
         session.shell.kill('SIGKILL');
       }
     }
-    
+
     // Wait a bit to ensure the process has fully terminated
     await this.sleep(100);
     this.cleanupTempFiles(session);

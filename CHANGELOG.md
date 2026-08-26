@@ -1,5 +1,48 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Command completion is now detected at actual completion** 🏁 - The
+  exit-code marker is chained onto the same shell line as the command
+  (`. '<tempfile>'; echo "<<<EXIT:<nonce>:$?>>>"`) instead of being typed
+  into the PTY 50ms later. This fixes the whole family of "doesn't notice
+  the command ended / waits for the full timeout" bugs:
+  - `runCommand("exit")` (or any command that kills the shell) resolved only
+    at the fallback timeout; the PTY exit handler now resolves the in-flight
+    command immediately with the shell's exit code, and queued commands fail
+    fast instead of hanging.
+  - Commands that read stdin (`read`, REPLs, `ssh`...) used to swallow the
+    delayed marker line as *input* — burning the full timeout AND feeding a
+    line of garbage into whatever was reading (picture a password prompt).
+    Nothing extra is typed into the PTY anymore.
+  - A command (or its output) merely *containing* marker-shaped text like
+    `<<<EXIT:7>>>` resolved instantly with that bogus exit code, before the
+    command even ran. Markers now carry a per-command nonce, and the marker
+    string is split in the echoed command text so no echo of the typed line
+    can ever match.
+  - After a timeout, the stale marker from the still-running command could
+    resolve the *next* command with the wrong exit code and mangled output.
+    Nonces make stale markers inert (and they're stripped from output).
+- **All commands go through the temp-file path** (not just multi-line ones),
+  which also fixes single-line commands longer than the tty's canonical-mode
+  line buffer (1024 bytes on macOS) being silently truncated, and translates
+  the temp-file path to `/mnt/<drive>/...` form so sourcing works under WSL
+  on Windows.
+- Exec plumbing (wrapper echoes, markers) is filtered out of session logs,
+  so `tailLogs` shows `$ command` + output without internal noise.
+
+### Changed
+
+- **A timed-out command is left untouched.** Previously the marker machinery
+  incidentally poked blocked stdin-readers with garbage input. Now a command
+  that times out (exitCode -1) simply keeps running in the session — check on
+  it with `tailLogs`, unblock it with `sendInput`, or stop it with
+  `sendSignal`. The `runCommand` tool description documents this.
+- Command bodies are sourced with `.` (POSIX) instead of the `source`
+  bashism, so plain sh/dash sessions work too.
+
 ## v1.6.0 - 2026-07-11
 
 ### Added
