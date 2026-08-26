@@ -8,8 +8,11 @@
 // Regex patterns for various ANSI escape sequences
 const ANSI_PATTERNS = {
   // CSI (Control Sequence Introducer) sequences: ESC [ ... final_byte
-  // This covers colors, cursor movement, screen clearing, etc.
-  csi: /\x1b\[[0-9;]*[A-Za-z]/g,
+  // Full CSI grammar: parameter bytes (0x30-0x3F, covers digits ; : ? >),
+  // intermediate bytes (0x20-0x2F), one final byte (0x40-0x7E). A letters-only
+  // final byte match would leave residue like "[1@" from insert-character
+  // sequences (ESC[1@) or "[2 q" from cursor-style sequences (ESC[2 q).
+  csi: /\x1b\[[0-?]*[ -/]*[@-~]/g,
   
   // OSC (Operating System Command) sequences: ESC ] ... BEL or ESC \
   // Used for window titles, hyperlinks, etc.

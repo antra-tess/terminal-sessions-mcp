@@ -132,12 +132,28 @@ export class PersistentSessionServer extends EventEmitter {
 
   constructor() {
     super();
-    // Clean up on exit
-    process.on('exit', () => this.killAll());
+    // Clean up on exit. Exit handlers cannot await, so force-kill synchronously —
+    // the async graceful path would be abandoned mid-flight anyway.
+    process.on('exit', () => this.forceKillAllSync());
     process.on('SIGINT', () => {
-      this.killAll();
+      this.forceKillAllSync();
       process.exit(0);
     });
+  }
+
+  /** Synchronous last-resort cleanup for process shutdown paths. */
+  private forceKillAllSync(): void {
+    for (const session of this.sessions.values()) {
+      if (session.isAlive) {
+        try {
+          session.shell.kill('SIGKILL');
+        } catch {
+          // Process may already be gone.
+        }
+      }
+      this.cleanupTempFiles(session);
+    }
+    this.sessions.clear();
   }
 
   /**
@@ -270,13 +286,23 @@ export class PersistentSessionServer extends EventEmitter {
     const isWindows = process.platform === 'win32';
     
     if (!isWindows) {
-      // Minimal setup - just ensure a clean environment
-      session.shell.write('export TERM=xterm-256color\n');
-      await this.sleep(200); // Give shell time to initialize
-      
+      // Minimal setup, ending in a ready marker so we wait exactly as long as
+      // the shell needs (slow rc files can outlive a fixed sleep and leak
+      // startup noise into the first command's output). The echoed input
+      // contains the literal `$$` (split so no echo can match), so only the
+      // shell actually executing the line produces the digits the regex needs.
+      session.shell.write('export TERM=xterm-256color; echo "<<<RD""Y:$$>>>"\n');
+      const deadline = Date.now() + 2000;
+      while (Date.now() < deadline && !/<<<RDY:\d+>>>/.test(session.outputBuffer)) {
+        await this.sleep(20);
+      }
+      // Small settle window for the prompt that follows the marker.
+      await this.sleep(50);
+
       // Clear any initial output/warnings
       session.outputBuffer = '';
       session.logs = [];
+      session.lineBuffer = '';
     }
   }
 
@@ -721,17 +747,20 @@ export class PersistentSessionServer extends EventEmitter {
 
     if (session.isAlive) {
       if (graceful) {
-        // Send SIGINT for graceful shutdown
-        session.shell.kill('SIGINT');
-        
-        // Wait up to 5 seconds for process to exit gracefully
+        // SIGHUP is the "terminal went away" signal: an interactive shell
+        // exits on it immediately and resends it to its jobs. (SIGINT, used
+        // previously, is IGNORED by an interactive bash — every graceful kill
+        // burned the full timeout and then SIGKILLed anyway.)
+        session.shell.kill('SIGHUP');
+
+        // Wait up to 3 seconds for the process to exit gracefully
         const timeout = 3000;
         const startTime = Date.now();
-        
+
         while (session.isAlive && Date.now() - startTime < timeout) {
-          await this.sleep(100);
+          await this.sleep(50);
         }
-        
+
         // If still alive after timeout, force kill
         if (session.isAlive) {
           this.addLog(session, '[Process did not exit gracefully, forcing termination]');
@@ -742,9 +771,9 @@ export class PersistentSessionServer extends EventEmitter {
         session.shell.kill('SIGKILL');
       }
     }
-    
-    // Wait a bit to ensure the process has fully terminated
-    await this.sleep(100);
+
+    // Brief settle so the exit handler (log flush, event) runs before removal
+    await this.sleep(50);
     this.cleanupTempFiles(session);
     this.sessions.delete(sessionId);
   }

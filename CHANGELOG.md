@@ -1,5 +1,34 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Client no longer times out before the server** ⏱️ - `exec` without an
+  explicit timeout used the generic 10s request timeout while the server's
+  default command timeout is 30s: any command taking 10-30s failed
+  client-side ("Request timeout: session.exec") and its result was dropped.
+  Request timeouts are now derived per-method (exec: command timeout + 5s
+  buffer; launch: covers the 15s pattern poll; screenshot: 30s).
+- **Graceful `killSession` is actually graceful (and fast)** - it sent
+  SIGINT, which an interactive bash ignores, so every graceful kill burned
+  the full 3s timeout and then SIGKILLed anyway. It now sends SIGHUP (the
+  "terminal went away" signal shells exit on) and polls at 50ms — an idle
+  session dies in ~100ms.
+- **Session creation waits for shell readiness** instead of a fixed 200ms
+  sleep, so slow rc files no longer leak startup noise into the first
+  command's output.
+- **ANSI cleaning covers the full CSI grammar** - sequences with non-letter
+  final bytes (e.g. insert-character `ESC[1@`, cursor-style `ESC[2 q`) used
+  to leave residue like `[1@` in cleaned output.
+- `listSessions` (MCP) returned `pid`/`startTime` fields that never existed
+  server-side (always undefined); it now returns the real fields
+  (`isAlive`, `createdAt`, `lastActivity`, `logSize`).
+- The MCP initialize handshake reports the real package version instead of a
+  hardcoded `1.0.0`.
+- Process-exit cleanup force-kills sessions synchronously — the old async
+  graceful path was abandoned mid-flight when the event loop stopped.
+
 ## v1.6.0 - 2026-07-11
 
 ### Added
