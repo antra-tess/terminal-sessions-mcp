@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **MCPL tool classes** - every tool in `tools/list` now carries
+  `_meta["mcpl/class"]` (MCPL RFC-008), so MCPL hosts can apply class-based
+  policy to it, e.g. which tools' arguments an observer may see (RFC-007).
+  All tools are `shell`; `takeScreenshot` is `shell` + `files` (it renders a
+  session's output, and `outputPath` writes a file). Plain MCP clients
+  ignore `_meta`.
+
 ## v1.6.0 - 2026-07-11
 
 ### Added

@@ -171,6 +171,24 @@ const TOOLS = {
   }
 };
 
+// MCPL tool classes (RFC-008), sent as `_meta["mcpl/class"]` in tools/list.
+// Hosts use them for policy, e.g. which tools' arguments an observer may see
+// (RFC-007). Typed by TOOLS, so a new tool cannot ship without a class.
+// takeScreenshot renders a session's output, not a desktop, so it is `shell`
+// rather than `computer`; its outputPath writes a file, hence also `files`.
+const TOOL_CLASSES: Record<keyof typeof TOOLS, string[]> = {
+  launch: ['shell'],
+  runCommand: ['shell'],
+  listSessions: ['shell'],
+  tailLogs: ['shell'],
+  sendInput: ['shell'],
+  sendSignal: ['shell'],
+  killSession: ['shell'],
+  killAll: ['shell'],
+  searchLogs: ['shell'],
+  takeScreenshot: ['shell', 'files'],
+};
+
 // Send response
 function sendResponse(id: string | number, result?: any, error?: any) {
   const response = {
@@ -229,7 +247,8 @@ rl.on('line', async (line) => {
           tools: Object.entries(TOOLS).map(([name, def]) => ({
             name,
             description: def.description,
-            inputSchema: def.parameters
+            inputSchema: def.parameters,
+            _meta: { 'mcpl/class': TOOL_CLASSES[name as keyof typeof TOOLS] }
           }))
         });
         break;
