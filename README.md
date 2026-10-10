@@ -391,8 +391,8 @@ npm run start-gui
 npm run cli -- list
 
 # Run demos
-npx ts-node examples/screenshot-demo.ts
-npx ts-node examples/service-management.ts
+npx tsx examples/screenshot-demo.ts
+npx tsx examples/service-management.ts
 ```
 
 ## Requirements

@@ -15,11 +15,11 @@
     "test": "npm run build && node --test",
     "dev": "tsc --watch",
     "start": "node dist/src/server/start-session-server.js",
-    "start-server": "ts-node src/server/start-session-server.ts",
-    "start-headless": "ts-node src/server/start-session-server.ts --headless",
-    "start-gui": "ts-node gui/src/start-gui.ts",
-    "mcp-server": "ts-node src/mcp/mcp-stdio-server.ts",
-    "cli": "ts-node cli/session-cli.ts",
+    "start-server": "tsx src/server/start-session-server.ts",
+    "start-headless": "tsx src/server/start-session-server.ts --headless",
+    "start-gui": "tsx gui/src/start-gui.ts",
+    "mcp-server": "tsx src/mcp/mcp-stdio-server.ts",
+    "cli": "tsx cli/session-cli.ts",
     "prepublishOnly": "npm run build",
     "postinstall": "node -e \"const fs=require('fs'),path=require('path');try{const p=path.join(path.dirname(require.resolve('node-pty/package.json')),'build/Release/spawn-helper');fs.chmodSync(p,0o755);}catch(e){}\""
   },
@@ -56,8 +56,8 @@
     "@types/express": "^5.0.5",
     "@types/node": "^20.0.0",
     "@types/ws": "^8.5.10",
-    "ts-node": "^10.0.0",
-    "typescript": "^5.0.0"
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2"
   },
   "engines": {
     "node": ">=18.0.0 <25.0.0"

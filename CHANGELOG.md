@@ -1,5 +1,25 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Builds with TypeScript 7** - `typescript` is now `^7.0.2`. For this code
+  its compiler emits the same JavaScript and declarations as 5.9; only the
+  source maps' segments differ. `tsconfig.json` drops `moduleResolution:
+  "node"`, which 7 removed (node10): TypeScript 6 and 7 resolve with
+  `bundler` for `module: commonjs` by default, and editors still on 5.x
+  read the file as before. It names `types: ["node"]`, since 7 no longer
+  includes every `@types` package by default. The run-from-source scripts
+  (`start-server`, `start-headless`, `start-gui`, `mcp-server`, `cli`) use
+  `tsx` instead of `ts-node`, which can't load TypeScript 7.
+
+### Fixed
+
+- **`session-cli` runs with `node`** - its shebang named `ts-node`, a dev
+  dependency, so the installed command failed with "No such file or
+  directory" wherever `ts-node` wasn't on the PATH.
+
 ## v1.6.0 - 2026-07-11
 
 ### Added

@@ -91,11 +91,11 @@ export class WebGUIServer {
 
   private setupStaticFiles(): void {
     // Serve static files BEFORE auth middleware so JS/CSS can load
-    // When ts-node: __dirname = .../terminal-sessions-mcp/gui/src
+    // When run from source (tsx): __dirname = .../terminal-sessions-mcp/gui/src
     // When compiled: __dirname = .../terminal-sessions-mcp/dist/gui/src
     const publicDir = __dirname.includes('/dist/')
       ? path.join(__dirname, '../../../gui/public')  // Compiled version
-      : path.join(__dirname, '../public');           // ts-node version
+      : path.join(__dirname, '../public');           // Run from source
     this.app.use(express.static(publicDir));
 
     // Main page (also before auth — the page itself is just HTML)

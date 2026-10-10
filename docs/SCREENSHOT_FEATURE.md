@@ -189,7 +189,7 @@ Run the included demo:
 
 ```bash
 cd terminal-sessions-mcp
-npx ts-node examples/screenshot-demo.ts
+npx tsx examples/screenshot-demo.ts
 ```
 
 This creates a session with colorful output and takes a screenshot to `demo-terminal-screenshot.png`.
