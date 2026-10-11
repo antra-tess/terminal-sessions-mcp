@@ -12,13 +12,22 @@
   read the file as before. It names `types: ["node"]`, since 7 no longer
   includes every `@types` package by default. The run-from-source scripts
   (`start-server`, `start-headless`, `start-gui`, `mcp-server`, `cli`) use
-  `tsx` instead of `ts-node`, which can't load TypeScript 7.
+  `tsx` instead of `ts-node`, which can't load TypeScript 7. `tsx` only
+  strips types, where `ts-node` checked them, so those scripts now start
+  past a type error; `npm run build` (or `npx tsc --noEmit`) checks them.
+  Building needs TypeScript 7's native compiler for the platform, which npm
+  installs as an optional dependency: there is none for 32-bit x86
+  (`linux-ia32`, `win32-ia32`) or Android, and an install that omits
+  optional dependencies has no `tsc`.
 
 ### Fixed
 
 - **`session-cli` runs with `node`** - its shebang named `ts-node`, a dev
   dependency, so the installed command failed with "No such file or
-  directory" wherever `ts-node` wasn't on the PATH.
+  directory" wherever `ts-node` wasn't on the PATH. It runs on Node
+  versions that can `require` an ES module (20.19 and later, 22.12 and
+  later, 24). On older ones it still stops: it loads the ESM-only
+  `strip-ansi` 7 with `require`, which predates this change.
 
 ## v1.6.0 - 2026-07-11
 
