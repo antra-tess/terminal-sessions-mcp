@@ -398,6 +398,7 @@ npx tsx examples/service-management.ts
 ## Requirements
 
 - **Node.js** 18.x, 20.x, or 22.x LTS (Node 25+ not yet supported due to node-pty compatibility)
+- **Building from source** (`npm run build`): Node 18.19 or later on 18.x, 20.10 or later on 20.x, or Node 22 or 24, which run TypeScript 7's `tsc`
 - **Headless Chrome** (via Puppeteer) for screenshots
 - **Modern browser** for web GUI (Chrome, Firefox, Safari, Edge)
 

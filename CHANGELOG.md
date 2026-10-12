@@ -18,7 +18,11 @@
   Building needs TypeScript 7's native compiler for the platform, which npm
   installs as an optional dependency: there is none for 32-bit x86
   (`linux-ia32`, `win32-ia32`) or Android, and an install that omits
-  optional dependencies has no `tsc`.
+  optional dependencies has no `tsc`. It also needs a Node release that runs
+  TypeScript 7's `tsc` launcher, an extensionless ES module: 18.19 or later
+  on Node 18, 20.10 or later on Node 20, and Node 22 and 24. Earlier 18.x
+  and 20.x releases stop with `ERR_UNKNOWN_FILE_EXTENSION` before compiling.
+  The package's `engines` range is unchanged.
 
 ### Fixed
 
