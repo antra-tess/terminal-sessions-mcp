@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Terminal Sessions - Web GUI</title>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
   <style>
@@ -255,11 +255,301 @@
       height: 64px;
       opacity: 0.5;
     }
+
+    /* ---- Mobile-only controls: hidden on desktop, shown by the media query below ---- */
+    .header-left {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      min-width: 0;
+    }
+
+    .sidebar-toggle,
+    .sidebar-close,
+    .sidebar-backdrop,
+    .key-bar,
+    .mobile-only {
+      display: none;
+    }
+
+    .sidebar-header-actions {
+      display: flex;
+      gap: 0.5rem;
+      align-items: center;
+    }
+
+    /* ---- Phones (portrait and landscape): sidebar becomes a drawer, terminal gets full width ---- */
+    @media (max-width: 768px), (max-height: 500px) {
+      html, body {
+        height: 100%;
+        overflow: hidden;
+        overscroll-behavior: none;
+        -webkit-text-size-adjust: 100%;
+      }
+
+      body {
+        height: 100vh;
+        height: 100dvh;
+        /* Avoid rubber-banding / address-bar jumps on iOS Safari */
+        position: fixed;
+        inset: 0;
+        width: 100%;
+      }
+
+      button {
+        min-height: 40px;
+        touch-action: manipulation;
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      header {
+        padding: 0.5rem 0.75rem;
+        padding-top: calc(0.5rem + env(safe-area-inset-top));
+        padding-left: calc(0.75rem + env(safe-area-inset-left));
+        padding-right: calc(0.75rem + env(safe-area-inset-right));
+        gap: 0.5rem;
+      }
+
+      h1 {
+        font-size: 1.1rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .status {
+        flex-shrink: 0;
+      }
+
+      .sidebar-toggle {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        min-width: 40px;
+        padding: 0;
+        font-size: 1.25rem;
+        line-height: 1;
+        background: #21262d;
+        border: 1px solid #30363d;
+      }
+
+      .sidebar-toggle:hover {
+        background: #30363d;
+      }
+
+      .main-container {
+        position: relative;
+      }
+
+      .sidebar {
+        position: fixed;
+        top: 0;
+        left: 0;
+        /* Tracks the visual viewport (set by app.js) so the keyboard doesn't hide the list */
+        height: 100%;
+        height: var(--app-height, 100%);
+        z-index: 30;
+        width: min(85vw, 320px);
+        max-width: 100%;
+        border-right: 1px solid #30363d;
+        box-shadow: 0 0 24px rgba(0, 0, 0, 0.6);
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+        padding-left: env(safe-area-inset-left);
+        transform: translateX(-100%);
+        transition: transform 0.2s ease-out;
+        visibility: hidden;
+      }
+
+      body.sidebar-open .sidebar {
+        transform: translateX(0);
+        visibility: visible;
+      }
+
+      .sidebar-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 20;
+        background: rgba(0, 0, 0, 0.55);
+        opacity: 0;
+        transition: opacity 0.2s ease-out;
+        pointer-events: none;
+      }
+
+      body.sidebar-open .sidebar-backdrop {
+        display: block;
+        opacity: 1;
+        pointer-events: auto;
+      }
+
+      .sidebar-close {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        padding: 0;
+        font-size: 1rem;
+      }
+
+      .sidebar-header button {
+        min-height: 40px;
+      }
+
+      .session-item {
+        min-height: 56px;
+        padding: 0.875rem 1rem;
+      }
+
+      /* With the keyboard open in landscape the drawer is very short: let the form scroll */
+      #new-session-form {
+        flex-shrink: 1;
+        min-height: 0;
+        overflow-y: auto;
+      }
+
+      /* 16px inputs stop iOS Safari from zooming the page on focus */
+      #new-session-form input,
+      .xterm .xterm-helper-textarea {
+        font-size: 16px;
+      }
+
+      .content {
+        width: 100%;
+        min-width: 0;
+      }
+
+      .terminal-header {
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        padding: 0.5rem 0.75rem;
+        padding-left: calc(0.75rem + env(safe-area-inset-left));
+        padding-right: calc(0.75rem + env(safe-area-inset-right));
+      }
+
+      .terminal-title {
+        flex: 1 1 100%;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: 0.9rem;
+      }
+
+      .terminal-actions {
+        flex: 1 1 100%;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+      }
+
+      .terminal-actions > button {
+        flex: 1 1 auto;
+        padding: 0.5rem 0.75rem;
+      }
+
+      .signal-buttons {
+        gap: 0.5rem;
+      }
+
+      button.signal {
+        min-width: 44px;
+        padding: 0.5rem 0.625rem;
+        font-size: 0.8rem;
+      }
+
+      #terminal-container {
+        padding: 0.5rem;
+        padding-left: calc(0.5rem + env(safe-area-inset-left));
+        padding-right: calc(0.5rem + env(safe-area-inset-right));
+        min-height: 0;
+      }
+
+      .empty-state {
+        padding: 1rem;
+        text-align: center;
+      }
+
+      .empty-state .mobile-only {
+        display: inline-block;
+      }
+
+      /* Extra keys row (Esc / Tab / Ctrl / arrows) above the on-screen keyboard */
+      .key-bar {
+        display: flex;
+        gap: 0.375rem;
+        padding: 0.375rem 0.5rem;
+        padding-left: calc(0.5rem + env(safe-area-inset-left));
+        padding-right: calc(0.5rem + env(safe-area-inset-right));
+        padding-bottom: calc(0.375rem + env(safe-area-inset-bottom));
+        background: #161b22;
+        border-top: 1px solid #30363d;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        flex-shrink: 0;
+      }
+
+      .key-bar::-webkit-scrollbar {
+        display: none;
+      }
+
+      .key-bar button {
+        flex: 1 0 auto;
+        min-width: 40px;
+        min-height: 40px;
+        padding: 0.25rem 0.5rem;
+        font-size: 0.8rem;
+        font-family: "Cascadia Code", "Fira Code", "Monaco", "Menlo", "Ubuntu Mono", monospace;
+        background: #21262d;
+        border: 1px solid #30363d;
+        color: #c9d1d9;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+
+      .key-bar button:hover {
+        background: #30363d;
+      }
+
+      .key-bar button.armed {
+        background: #1f6feb;
+        border-color: #58a6ff;
+        color: white;
+      }
+    }
+
+    /* Landscape phones: squeeze vertical chrome so the terminal keeps enough rows */
+    @media (max-height: 500px) {
+      header {
+        padding-top: calc(0.25rem + env(safe-area-inset-top));
+        padding-bottom: 0.25rem;
+      }
+
+      .terminal-header {
+        padding-top: 0.25rem;
+        padding-bottom: 0.25rem;
+      }
+
+      .terminal-title {
+        flex: 1 1 auto;
+      }
+
+      .terminal-actions {
+        flex: 0 1 auto;
+      }
+
+      .key-bar button {
+        min-height: 36px;
+      }
+    }
   </style>
 </head>
 <body>
   <header>
-    <h1>📺 Terminal Sessions</h1>
+    <div class="header-left">
+      <button id="sidebar-toggle" class="sidebar-toggle" onclick="toggleSidebar()"
+              aria-label="Toggle session list" aria-controls="sidebar" aria-expanded="false">☰</button>
+      <h1>📺 Terminal Sessions</h1>
+    </div>
     <div class="status">
       <div class="status-dot"></div>
       <span>Connected</span>
@@ -267,10 +557,14 @@
   </header>
 
   <div class="main-container">
-    <div class="sidebar">
+    <div id="sidebar-backdrop" class="sidebar-backdrop" onclick="closeSidebar()"></div>
+    <div class="sidebar" id="sidebar">
       <div class="sidebar-header">
         <span>Active Sessions</span>
-        <button onclick="toggleNewSessionForm()">+ New</button>
+        <div class="sidebar-header-actions">
+          <button onclick="toggleNewSessionForm()">+ New</button>
+          <button class="secondary sidebar-close" onclick="closeSidebar()" aria-label="Close session list">✕</button>
+        </div>
       </div>
       <div id="new-session-form">
         <input type="text" id="new-session-name" placeholder="Session name (e.g., my-session)" />
@@ -291,6 +585,7 @@
           <path d="M0 2a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V2zm9.5 10.5H2V4h12v8.5H9.5z"/>
         </svg>
         <p>Select a session to view</p>
+        <button class="secondary mobile-only" onclick="openSidebar()">Show sessions</button>
       </div>
     </div>
   </div>

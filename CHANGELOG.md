@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **Web GUI: phone support** 📱 - On narrow or short viewports (phones in
+  portrait and landscape) the session list collapses into a drawer behind a
+  ☰ button, so the terminal gets the full width instead of a ~6-column strip.
+  Toolbar buttons wrap and are touch-sized, xterm.js refits on rotation,
+  resize and when the on-screen keyboard opens (visual viewport tracking),
+  safe-area insets are respected and the page no longer scrolls sideways.
+  A small extra-keys row (Esc / Tab / sticky Ctrl / arrows) sits above the
+  keyboard. Desktop layout is unchanged.
+
 ## v1.6.0 - 2026-07-11
 
 ### Added
