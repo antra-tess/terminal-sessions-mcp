@@ -19,6 +19,13 @@
   still authenticate; it is dropped again on a 401. A small app-shell service
   worker registers only in a secure context (https / localhost); plain http on
   a VPN address works without it.
+- **Web GUI: desktop sidebar collapse and extra-keys toggle** - The ☰ button
+  now also appears on desktop and collapses/expands the session sidebar
+  (remembered per browser). A "⌨️ Keys" button in the terminal header toggles the
+  Esc/Tab/Ctrl/arrows row (on by default on touch devices, off on desktop,
+  remembered). The terminal refits through a `ResizeObserver` on every layout
+  and the PTY is only resized when the column/row grid actually changes.
+  Installing as an app also works in desktop Chrome/Edge over https/localhost.
 
 ## v1.6.0 - 2026-07-11
 

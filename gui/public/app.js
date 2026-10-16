@@ -57,12 +57,29 @@ let currentSession = null;
 let currentTerminalCleanup = null;
 const sessions = new Map();
 
-// Must match the media query in index.html that switches to the phone layout
-const MOBILE_LAYOUT_QUERY = '(max-width: 768px), (max-height: 500px)';
+// The media query that switches to the phone layout (defined in index.html, next to the CSS)
+const MOBILE_LAYOUT_QUERY = window.MOBILE_LAYOUT_QUERY || '(max-width: 768px), (max-height: 500px)';
 const mobileLayoutMedia = window.matchMedia(MOBILE_LAYOUT_QUERY);
 
 function isMobileLayout() {
   return mobileLayoutMedia.matches;
+}
+
+// Remembered UI preferences (per browser): desktop sidebar collapsed, extra keys row shown.
+// Read by the inline script in index.html, written here.
+const SIDEBAR_STORAGE_KEY = 'terminal-sessions.sidebar';
+const KEYS_STORAGE_KEY = 'terminal-sessions.keys';
+
+function writePreference(key, value) {
+  try { localStorage.setItem(key, value); } catch (e) { /* storage unavailable */ }
+}
+
+// Body classes for the preferences are set by the inline script at the top of
+// <body> (before first paint). Re-run it when the layout changes so the keys
+// row default follows the breakpoint until the user picks explicitly.
+function refreshPreferenceDefaults() {
+  if (typeof window.applyStoredPreferences === 'function') window.applyStoredPreferences();
+  syncKeysToggle();
 }
 
 // Initialize
@@ -110,6 +127,8 @@ function setupMobileLayout() {
   const onLayoutChange = () => {
     syncViewportHeight();
     if (!isMobileLayout()) closeSidebar();
+    refreshPreferenceDefaults();
+    syncSidebarToggle();
   };
   if (mobileLayoutMedia.addEventListener) {
     mobileLayoutMedia.addEventListener('change', onLayoutChange);
@@ -118,6 +137,36 @@ function setupMobileLayout() {
   }
   window.addEventListener('orientationchange', () => setTimeout(syncViewportHeight, 300));
   syncViewportHeight();
+  syncSidebarToggle();
+}
+
+// aria-expanded on ☰ reflects the drawer on phones and the collapsed state on desktop
+function syncSidebarToggle() {
+  const expanded = isMobileLayout()
+    ? document.body.classList.contains('sidebar-open')
+    : !document.body.classList.contains('sidebar-collapsed');
+  document.getElementById('sidebar-toggle')?.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+}
+
+// Desktop: hide/show the sidebar column (remembered); the terminal refits via its ResizeObserver
+function setSidebarCollapsed(collapsed) {
+  document.body.classList.toggle('sidebar-collapsed', collapsed);
+  writePreference(SIDEBAR_STORAGE_KEY, collapsed ? 'collapsed' : 'expanded');
+  syncSidebarToggle();
+}
+
+function syncKeysToggle() {
+  const show = document.body.classList.contains('show-keys');
+  document.querySelectorAll('.keys-toggle').forEach(b => b.setAttribute('aria-pressed', show ? 'true' : 'false'));
+  if (!show) setCtrlArmed(false);
+}
+
+function toggleKeyBar() {
+  const show = !document.body.classList.contains('show-keys');
+  document.body.classList.toggle('show-keys', show);
+  writePreference(KEYS_STORAGE_KEY, show ? 'on' : 'off');
+  syncKeysToggle();
+  currentTerminal?.focus();
 }
 
 function syncViewportHeight() {
@@ -146,6 +195,10 @@ function setBackgroundInert(inert) {
 }
 
 function openSidebar({ focus = true } = {}) {
+  if (!isMobileLayout()) {
+    setSidebarCollapsed(false);
+    return;
+  }
   if (document.body.classList.contains('sidebar-open')) return;
   document.body.classList.add('sidebar-open');
   document.getElementById('sidebar-toggle')?.setAttribute('aria-expanded', 'true');
@@ -167,7 +220,9 @@ function closeSidebar() {
 }
 
 function toggleSidebar() {
-  if (document.body.classList.contains('sidebar-open')) {
+  if (!isMobileLayout()) {
+    setSidebarCollapsed(!document.body.classList.contains('sidebar-collapsed'));
+  } else if (document.body.classList.contains('sidebar-open')) {
     closeSidebar();
   } else {
     openSidebar();
@@ -269,6 +324,8 @@ async function createTerminalView(sessionId) {
         </div>
         <button class="secondary" onclick="clearTerminal()">🗑️ Clear</button>
         <button class="secondary danger" onclick="killCurrentSession()">💀 Kill Session</button>
+        <button class="secondary keys-toggle" onclick="toggleKeyBar()" title="Extra keys (Esc, Tab, Ctrl, arrows)"
+                aria-label="Toggle extra keys" aria-pressed="${document.body.classList.contains('show-keys')}">⌨️ Keys</button>
       </div>
     </div>
     <div id="terminal-container">
@@ -532,7 +589,7 @@ function killCurrentSession() {
         <path d="M0 2a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V2zm9.5 10.5H2V4h12v8.5H9.5z"/>
       </svg>
       <p>Session killed</p>
-      <button class="secondary mobile-only" onclick="openSidebar()">Show sessions</button>
+      <button class="secondary show-sessions" onclick="openSidebar()">Show sessions</button>
     </div>
   `;
   

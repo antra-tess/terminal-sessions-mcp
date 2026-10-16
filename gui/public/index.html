@@ -298,12 +298,93 @@
       min-width: 0;
     }
 
-    .sidebar-toggle,
     .sidebar-close,
     .sidebar-backdrop,
     .key-bar,
-    .mobile-only {
+    .show-sessions {
       display: none;
+    }
+
+    /* ☰ collapses the sidebar on desktop (remembered) and opens the drawer on phones */
+    .sidebar-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 32px;
+      min-width: 32px;
+      height: 32px;
+      padding: 0;
+      font-size: 1.1rem;
+      line-height: 1;
+      background: #21262d;
+      border: 1px solid #30363d;
+    }
+
+    .sidebar-toggle:hover {
+      background: #30363d;
+    }
+
+    body.sidebar-collapsed .sidebar {
+      display: none;
+    }
+
+    body.sidebar-collapsed .empty-state .show-sessions {
+      display: inline-block;
+    }
+
+    /* ⌨ toggles the extra keys row */
+    button.keys-toggle {
+      padding: 0.25rem 0.5rem;
+      font-size: 0.875rem;
+      line-height: 1;
+    }
+
+    button.keys-toggle[aria-pressed="true"] {
+      background: #1f6feb;
+      border-color: #58a6ff;
+    }
+
+    /* Extra keys row (Esc / Tab / Ctrl / arrows): on by default on touch devices, toggleable everywhere */
+    body.show-keys .key-bar {
+      display: flex;
+      gap: 0.375rem;
+      padding: 0.375rem 0.5rem;
+      padding-left: calc(0.5rem + env(safe-area-inset-left));
+      padding-right: calc(0.5rem + env(safe-area-inset-right));
+      padding-bottom: calc(0.375rem + env(safe-area-inset-bottom));
+      background: #161b22;
+      border-top: 1px solid #30363d;
+      overflow-x: auto;
+      -webkit-overflow-scrolling: touch;
+      flex-shrink: 0;
+    }
+
+    .key-bar::-webkit-scrollbar {
+      display: none;
+    }
+
+    .key-bar button {
+      flex: 1 0 auto;
+      min-width: 40px;
+      min-height: 32px;
+      padding: 0.25rem 0.5rem;
+      font-size: 0.8rem;
+      font-family: "Cascadia Code", "Fira Code", "Monaco", "Menlo", "Ubuntu Mono", monospace;
+      background: #21262d;
+      border: 1px solid #30363d;
+      color: #c9d1d9;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+    .key-bar button:hover {
+      background: #30363d;
+    }
+
+    .key-bar button.armed {
+      background: #1f6feb;
+      border-color: #58a6ff;
+      color: white;
     }
 
     .sidebar-header-actions {
@@ -356,20 +437,15 @@
       }
 
       .sidebar-toggle {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
         width: 40px;
         min-width: 40px;
-        padding: 0;
+        height: 40px;
         font-size: 1.25rem;
-        line-height: 1;
-        background: #21262d;
-        border: 1px solid #30363d;
       }
 
-      .sidebar-toggle:hover {
-        background: #30363d;
+      /* The desktop "collapsed" state doesn't apply to the drawer */
+      body.sidebar-collapsed .sidebar {
+        display: flex;
       }
 
       .main-container {
@@ -504,51 +580,16 @@
         text-align: center;
       }
 
-      .empty-state .mobile-only {
+      .empty-state .show-sessions {
         display: inline-block;
       }
 
-      /* Extra keys row (Esc / Tab / Ctrl / arrows) above the on-screen keyboard */
-      .key-bar {
-        display: flex;
-        gap: 0.375rem;
-        padding: 0.375rem 0.5rem;
-        padding-left: calc(0.5rem + env(safe-area-inset-left));
-        padding-right: calc(0.5rem + env(safe-area-inset-right));
-        padding-bottom: calc(0.375rem + env(safe-area-inset-bottom));
-        background: #161b22;
-        border-top: 1px solid #30363d;
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-        flex-shrink: 0;
-      }
-
-      .key-bar::-webkit-scrollbar {
-        display: none;
-      }
-
       .key-bar button {
-        flex: 1 0 auto;
-        min-width: 40px;
         min-height: 40px;
-        padding: 0.25rem 0.5rem;
-        font-size: 0.8rem;
-        font-family: "Cascadia Code", "Fira Code", "Monaco", "Menlo", "Ubuntu Mono", monospace;
-        background: #21262d;
-        border: 1px solid #30363d;
-        color: #c9d1d9;
-        user-select: none;
-        -webkit-user-select: none;
       }
 
-      .key-bar button:hover {
-        background: #30363d;
-      }
-
-      .key-bar button.armed {
-        background: #1f6feb;
-        border-color: #58a6ff;
-        color: white;
+      button.keys-toggle {
+        min-width: 44px;
       }
     }
 
@@ -589,6 +630,22 @@
   </style>
 </head>
 <body>
+  <script>
+    // Remembered UI preferences, applied before anything paints so a collapsed
+    // sidebar doesn't flash open while the CDN scripts below are still loading.
+    // app.js calls this again when the layout crosses the phone breakpoint.
+    window.MOBILE_LAYOUT_QUERY = '(max-width: 768px), (max-height: 500px)';  // keep in sync with the CSS above
+    window.applyStoredPreferences = function () {
+      var read = function (key) { try { return localStorage.getItem(key); } catch (e) { return null; } };
+      document.body.classList.toggle('sidebar-collapsed', read('terminal-sessions.sidebar') === 'collapsed');
+      var keys = read('terminal-sessions.keys');
+      // Default: on for phones and other touch-first devices (tablets), off on desktop
+      var showKeys = keys ? keys === 'on'
+        : (window.matchMedia(window.MOBILE_LAYOUT_QUERY).matches || window.matchMedia('(pointer: coarse)').matches);
+      document.body.classList.toggle('show-keys', showKeys);
+    };
+    window.applyStoredPreferences();
+  </script>
   <header>
     <div class="header-left">
       <button id="sidebar-toggle" class="sidebar-toggle" onclick="toggleSidebar()"
@@ -630,7 +687,7 @@
           <path d="M0 2a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V2zm9.5 10.5H2V4h12v8.5H9.5z"/>
         </svg>
         <p>Select a session to view</p>
-        <button class="secondary mobile-only" onclick="openSidebar()">Show sessions</button>
+        <button class="secondary show-sessions" onclick="openSidebar()">Show sessions</button>
       </div>
     </div>
   </div>

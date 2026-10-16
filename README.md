@@ -166,6 +166,7 @@ The server includes an optional web-based GUI for human operators to monitor and
 - 🔄 Real-time output streaming
 - ⚡ Signal controls (Ctrl+C, Ctrl+Z, SIGTERM)
 - 📱 Phone layout (session drawer, full-width terminal, Esc/Tab/Ctrl/arrow keys bar) and installable as a home-screen app
+- ↔️ Collapsible sidebar (☰) and an optional extra-keys row ("⌨️ Keys") on desktop, both remembered per browser
 
 **Access:** Open `http://localhost:3200` when running with GUI enabled (default), or use `--headless` to disable.
 
