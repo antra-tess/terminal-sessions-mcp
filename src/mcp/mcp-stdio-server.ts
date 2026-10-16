@@ -106,7 +106,8 @@ const TOOLS = {
           items: { type: 'string' },
           description: 'Named keys sent after the text, tmux send-keys style: Enter, Tab, Shift-Tab, Esc, Space, Backspace, Delete, Up, Down, Left, Right, Home, End, PageUp, PageDown, F1-F12, C-a..C-z (Ctrl), M-<char> (Alt). E.g. ["Enter"] to submit in a TUI, ["C-c"] for Ctrl+C, ["Esc"] to dismiss.'
         },
-        appendNewline: { type: 'boolean', description: 'Append Enter (\\r) after input. Default: true when `keys` is absent, false when `keys` is given.' }
+        appendNewline: { type: 'boolean', description: 'Append Enter (\\r) after input. Default: true when `keys` is absent, false when `keys` is given.' },
+        enterDelayMs: { type: 'number', minimum: 0, maximum: 5000, description: 'Send the appended Enter as a separate write this many ms (0-5000) after the text, instead of in the same write. Useful for TUIs like Claude Code that treat fast input as paste and ignore a trailing Enter; try 150. Only applies when Enter would be appended (see appendNewline).' }
       },
       required: ['session', 'input']
     }

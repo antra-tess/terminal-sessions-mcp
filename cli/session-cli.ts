@@ -77,6 +77,8 @@ Commands:
   create <session> [--cwd=DIR] Create a new session
   kill <session>               Terminate a session
   input <session> <text...>    Send input to a session
+      --raw                    Do not append Enter
+      --enter-delay=<ms>       Send Enter as a separate write <ms> later (0-5000)
   signal <session> [--signal=SIGINT] Send a signal to a session
 
 Options:
@@ -183,7 +185,14 @@ async function handleInput(
   }
   const text = rest.join(' ');
   const append = flags.raw ? false : true;
-  await client.sendInput(sessionId, text, append);
+  let enterDelayMs: number | undefined;
+  if (flags['enter-delay'] !== undefined) {
+    enterDelayMs = Number(flags['enter-delay']);
+    if (!Number.isFinite(enterDelayMs)) {
+      throw new Error('--enter-delay expects a number of milliseconds');
+    }
+  }
+  await client.sendInput(sessionId, text, append, undefined, enterDelayMs);
   console.log('Input sent');
 }
 

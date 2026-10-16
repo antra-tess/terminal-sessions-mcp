@@ -57,12 +57,111 @@ export function decodeKey(name: string): string {
  *   so Enter is only appended if `appendNewline` is explicitly true.
  */
 export function buildInputData(input: string, appendNewline?: boolean, keys?: string[]): string {
+  const { body, enter } = splitInputData(input, appendNewline, keys);
+  return body + enter;
+}
+
+/**
+ * Same as buildInputData, but keeps the trailing Enter separate:
+ * `body` is the text plus decoded keys, `enter` is '\r' or ''.
+ */
+export function splitInputData(
+  input: string,
+  appendNewline?: boolean,
+  keys?: string[]
+): { body: string; enter: string } {
   const hasKeys = !!(keys && keys.length > 0);
-  let data = input;
+  let body = input;
   if (hasKeys) {
-    data += keys!.map(decodeKey).join('');
+    body += keys!.map(decodeKey).join('');
   }
   const shouldAppend = hasKeys ? appendNewline === true : appendNewline !== false;
-  if (shouldAppend) data += '\r';
-  return data;
+  return { body, enter: shouldAppend ? '\r' : '' };
+}
+
+/** Upper bound for `enterDelayMs` (milliseconds). */
+export const MAX_ENTER_DELAY_MS = 5000;
+
+/**
+ * Validate the optional `enterDelayMs` parameter of sendInput.
+ * Returns undefined when absent (null/undefined), the number when it is a
+ * finite number in 0..MAX_ENTER_DELAY_MS, and throws otherwise.
+ */
+export function validateEnterDelayMs(value: unknown): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > MAX_ENTER_DELAY_MS) {
+    throw new Error(`enterDelayMs must be a number between 0 and ${MAX_ENTER_DELAY_MS}, got ${JSON.stringify(value)}`);
+  }
+  return value;
+}
+
+/** One PTY write: wait `delayMs` (after the previous write), then write `data`. */
+export interface PlannedWrite {
+  data: string;
+  delayMs: number;
+}
+
+/**
+ * Plan the PTY writes for a sendInput call.
+ *
+ * Without `enterDelayMs` this is a single write of buildInputData(...), i.e.
+ * the text and the trailing Enter go out together (unchanged behaviour).
+ *
+ * With `enterDelayMs` set, and when Enter would be appended after a non-empty
+ * body, the body is written first and '\r' goes out as a SEPARATE write
+ * `enterDelayMs` later. Some TUIs (e.g. Claude Code) treat a fast, long chunk
+ * as a bracketed paste and don't act on a '\r' that arrives in the same
+ * write; a short pause before Enter makes them submit.
+ */
+export function planInputWrites(
+  input: string,
+  appendNewline?: boolean,
+  keys?: string[],
+  enterDelayMs?: number
+): PlannedWrite[] {
+  const { body, enter } = splitInputData(input, appendNewline, keys);
+  if (enterDelayMs === undefined || !enter || !body) {
+    return [{ data: body + enter, delayMs: 0 }];
+  }
+  return [
+    { data: body, delayMs: 0 },
+    { data: enter, delayMs: enterDelayMs }
+  ];
+}
+
+/**
+ * Execute planned writes in order, honouring each write's delay.
+ * `isAlive` is consulted after every wait so nothing is written to a session
+ * that exited while we were sleeping (throws in that case).
+ */
+export async function performInputWrites(
+  writes: PlannedWrite[],
+  write: (data: string) => void,
+  options: { isAlive?: () => boolean; sleep?: (ms: number) => Promise<void> } = {}
+): Promise<void> {
+  const sleep = options.sleep ?? ((ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms)));
+  for (const w of writes) {
+    if (w.delayMs > 0) {
+      await sleep(w.delayMs);
+      if (options.isAlive && !options.isAlive()) {
+        throw new Error('Session exited before the delayed Enter could be sent');
+      }
+    }
+    write(w.data);
+  }
+}
+
+/**
+ * A server that predates `enterDelayMs` ignores the parameter and still
+ * answers { success: true }; new servers echo the value back. Fail loudly
+ * instead of silently sending text+Enter in one write.
+ */
+export function assertEnterDelayHonoured(result: any, enterDelayMs?: number): void {
+  if (enterDelayMs === undefined || enterDelayMs === null) return;
+  if (!result || result.enterDelayMs === undefined) {
+    throw new Error(
+      'The session server ignored enterDelayMs (it predates this option). ' +
+      'Restart/upgrade the session server, or omit enterDelayMs.'
+    );
+  }
 }

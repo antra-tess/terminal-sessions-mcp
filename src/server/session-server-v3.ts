@@ -15,7 +15,7 @@ import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { buildInputData } from './keys';
+import { planInputWrites, performInputWrites, validateEnterDelayMs } from './keys';
 
 interface SessionInfo {
   id: string;
@@ -106,6 +106,7 @@ type SessionEventMap = {
     input: string;
     appendNewline: boolean;
     keys?: string[];
+    enterDelayMs?: number;
     timestamp: Date;
   };
   'session:signal': {
@@ -117,6 +118,8 @@ type SessionEventMap = {
 
 export class PersistentSessionServer extends EventEmitter {
   private sessions: Map<string, SessionInfo> = new Map();
+  /** Per-session tail of in-flight sendInput work, so inputs never interleave. */
+  private inputChains: Map<string, Promise<void>> = new Map();
   private readonly maxLogSize = 10000; // lines per session
   private readonly maxOutputBufferSize = 100 * 1024 * 1024; // 100MB max buffer size
   private readonly defaultCommandTimeout = 30000; // 30 seconds default
@@ -506,25 +509,68 @@ export class PersistentSessionServer extends EventEmitter {
    * @param keys    Optional named keys sent after the text, tmux send-keys
    *   style: Enter, Tab, Esc, Up/Down/Left/Right, Backspace, C-c, M-x, F1...
    *   See src/server/keys.ts for decoding.
+   * @param enterDelayMs  Optional (0..5000). When set and Enter would be
+   *   appended, the text (and keys) are written first and '\r' follows as a
+   *   separate write after this many milliseconds. Useful for TUIs like
+   *   Claude Code that treat a fast chunk as a paste and won't submit on a
+   *   '\r' that arrives in the same write. The returned promise resolves
+   *   once the Enter has been written.
+   *
+   * Inputs to one session are serialized: a call that arrives while another
+   * call's delayed Enter is still pending is written after that Enter, so
+   * concurrent callers can't splice their text into each other's line.
    */
-  sendInput(sessionId: string, input: string, appendNewline?: boolean, keys?: string[]): void {
+  async sendInput(
+    sessionId: string,
+    input: string,
+    appendNewline?: boolean,
+    keys?: string[],
+    enterDelayMs?: number
+  ): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session || !session.isAlive) {
       throw new Error(`Session ${sessionId} not available`);
     }
 
-    const dataToSend = buildInputData(input, appendNewline, keys);
-    session.shell.write(dataToSend);
-    session.lastActivity = new Date();
+    const delay = validateEnterDelayMs(enterDelayMs);
+    const writes = planInputWrites(input, appendNewline, keys, delay);
 
     const hasKeys = !!(keys && keys.length > 0);
-    this.notify('session:input', {
+    const notifyParams = {
       sessionId,
       input,
       appendNewline: hasKeys ? appendNewline === true : appendNewline !== false,
       keys,
+      enterDelayMs: delay,
       timestamp: new Date()
-    });
+    };
+
+    const doWrites = () => {
+      if (!session.isAlive) {
+        throw new Error(`Session ${sessionId} not available`);
+      }
+      return performInputWrites(
+        writes,
+        data => {
+          session.shell.write(data);
+          session.lastActivity = new Date();
+        },
+        { isAlive: () => session.isAlive }
+      );
+    };
+
+    // With nothing queued the first write happens synchronously, as before;
+    // only a pending delayed Enter (ours or an earlier caller's) defers it.
+    const pending = this.inputChains.get(sessionId);
+    const run = pending ? pending.then(doWrites, doWrites) : doWrites();
+    this.inputChains.set(sessionId, run);
+    const cleanup = () => {
+      if (this.inputChains.get(sessionId) === run) this.inputChains.delete(sessionId);
+    };
+    run.then(cleanup, cleanup);
+
+    await run;
+    this.notify('session:input', notifyParams);
   }
 
   /**

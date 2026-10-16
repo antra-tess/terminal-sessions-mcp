@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`enterDelayMs` for `sendInput`** - Optional parameter (0-5000) that sends
+  the appended Enter (`\r`) as a separate write the given number of
+  milliseconds after the text. TUIs such as Claude Code treat a fast, long
+  chunk as a paste and ignore a trailing Enter in the same write; a short
+  pause fixes that. Available in the MCP tool, the WebSocket API
+  (`session.input`), the client and the CLI (`input --enter-delay=<ms>`).
+  Inputs to one session are serialized, so a call that arrives while a
+  delayed Enter is pending is written after it. The server echoes
+  `enterDelayMs` in the `session.input` response and the clients raise an
+  error when a (not yet restarted) older server ignores it instead of
+  silently sending text and Enter together. Default behaviour is unchanged.
+
 ## v1.6.0 - 2026-07-11
 
 ### Added
