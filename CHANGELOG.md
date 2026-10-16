@@ -12,6 +12,13 @@
   safe-area insets are respected and the page no longer scrolls sideways.
   A small extra-keys row (Esc / Tab / sticky Ctrl / arrows) sits above the
   keyboard. Desktop layout is unchanged.
+- **Web GUI: installable (PWA)** - Web app manifest, icons and the
+  `apple-mobile-web-app-*` meta tags, so *Add to Home Screen* gives a
+  standalone app on iOS and Android. The `?token=` from the URL is remembered
+  in `localStorage` so the installed app (which opens without the query) can
+  still authenticate; it is dropped again on a 401. A small app-shell service
+  worker registers only in a secure context (https / localhost); plain http on
+  a VPN address works without it.
 
 ## v1.6.0 - 2026-07-11
 

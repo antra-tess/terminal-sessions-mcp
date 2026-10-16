@@ -1,8 +1,54 @@
 // Terminal Sessions Web GUI Client
 
-// Extract token from URL query string
+// Auth token: from the URL (?token=...), otherwise the one remembered from a
+// previous visit. An installed home-screen app opens start_url without the
+// query, so the token is kept in localStorage; see resolveAuthToken().
+const TOKEN_STORAGE_KEY = 'terminal-sessions.token';
 const urlParams = new URLSearchParams(window.location.search);
-const authToken = urlParams.get('token');
+const authToken = resolveAuthToken();
+
+function resolveAuthToken() {
+  const fromUrl = urlParams.get('token');
+  if (fromUrl) {
+    try { localStorage.setItem(TOKEN_STORAGE_KEY, fromUrl); } catch (e) { /* storage unavailable */ }
+    return fromUrl;
+  }
+  try { return localStorage.getItem(TOKEN_STORAGE_KEY); } catch (e) { return null; }
+}
+
+function readStoredToken() {
+  try { return localStorage.getItem(TOKEN_STORAGE_KEY); } catch (e) { return null; }
+}
+
+function forgetStoredToken() {
+  try { localStorage.removeItem(TOKEN_STORAGE_KEY); } catch (e) { /* storage unavailable */ }
+}
+
+// Shown when the server answers 401. An installed iOS home-screen app has its
+// own storage (nothing is copied from Safari), so this is how it gets its token.
+function showTokenPrompt(container) {
+  if (document.getElementById('token-form')) return;  // keep what the user is typing
+  container.innerHTML = `
+    <form id="token-form" class="token-form" onsubmit="return submitToken(event)">
+      <p>Unauthorized. Paste the server's access token to connect:</p>
+      <input type="password" id="token-input" placeholder="token" autocomplete="off" autocapitalize="off" spellcheck="false" />
+      <button type="submit">Connect</button>
+    </form>
+  `;
+}
+
+function submitToken(event) {
+  event.preventDefault();
+  const token = document.getElementById('token-input').value.trim();
+  if (!token) return false;
+  try { localStorage.setItem(TOKEN_STORAGE_KEY, token); } catch (e) { /* storage unavailable */ }
+  // Reload without any stale ?token= so the stored one is used by the REST
+  // calls and the socket.io handshake alike
+  const url = new URL(window.location.href);
+  url.searchParams.delete('token');
+  window.location.replace(url.href);
+  return false;
+}
 
 const socket = io({ query: { token: authToken } });
 let currentTerminal = null;
@@ -24,10 +70,21 @@ document.addEventListener('DOMContentLoaded', () => {
   loadSessions();
   setupSocketListeners();
   setupMobileLayout();
+  registerServiceWorker();
   
   // Refresh sessions every 5 seconds
   setInterval(loadSessions, 5000);
 });
+
+// Service workers only exist in a secure context (https or localhost). The GUI
+// is usually reached over plain http on a VPN address, where this is a no-op;
+// nothing else depends on the worker, it only caches the app shell.
+function registerServiceWorker() {
+  if (!window.isSecureContext || !('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.register('/sw.js').catch(error => {
+    console.warn('[PWA] Service worker not registered:', error);
+  });
+}
 
 // ---- Mobile layout: session list as a drawer, viewport-height tracking ----
 
@@ -126,9 +183,16 @@ function preferredFontSize() {
 async function loadSessions() {
   try {
     const response = await fetch(`/api/sessions?token=${authToken}`);
-    const sessionsList = await response.json();
-    
     const container = document.getElementById('sessions-list');
+    
+    if (response.status === 401) {
+      // Only forget the token this page used; another tab may have saved a newer one
+      if (authToken && readStoredToken() === authToken) forgetStoredToken();
+      showTokenPrompt(container);
+      return;
+    }
+    
+    const sessionsList = await response.json();
     
     if (sessionsList.length === 0) {
       container.innerHTML = '<div style="padding: 1rem; opacity: 0.5; text-align: center;">No active sessions</div>';

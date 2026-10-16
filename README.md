@@ -165,8 +165,11 @@ The server includes an optional web-based GUI for human operators to monitor and
 - 🎨 Beautiful GitHub-inspired dark theme
 - 🔄 Real-time output streaming
 - ⚡ Signal controls (Ctrl+C, Ctrl+Z, SIGTERM)
+- 📱 Phone layout (session drawer, full-width terminal, Esc/Tab/Ctrl/arrow keys bar) and installable as a home-screen app
 
 **Access:** Open `http://localhost:3200` when running with GUI enabled (default), or use `--headless` to disable.
+
+**On a phone:** open the GUI URL (including `?token=...` if the server uses one) in Safari or Chrome and use *Add to Home Screen* / *Install app*. The token is remembered in the browser's local storage, so the installed app can open without it; it is forgotten again if the server rejects it. The service worker (offline app shell) only registers over `https` or `localhost`; over plain `http` on a LAN/VPN address the app still installs and works, it just always loads from the server.
 
 ## TUI Control Sequences Support
 

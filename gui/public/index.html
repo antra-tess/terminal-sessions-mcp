@@ -4,6 +4,15 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Terminal Sessions - Web GUI</title>
+  <!-- Installable as a home-screen app (PWA); see manifest.webmanifest and app.js -->
+  <meta name="theme-color" content="#161b22">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Terminal Sessions">
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" href="/icons/icon-192.png" type="image/png">
+  <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
   <style>
     * {
@@ -125,6 +134,31 @@
     .sessions-list {
       flex: 1;
       overflow-y: auto;
+    }
+
+    /* Token prompt shown in the session list after a 401 */
+    .token-form {
+      padding: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      font-size: 0.875rem;
+      color: #8b949e;
+    }
+
+    .token-form input {
+      width: 100%;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      padding: 0.5rem;
+      color: #c9d1d9;
+      font-size: 0.875rem;
+    }
+
+    .token-form input:focus {
+      outline: none;
+      border-color: #58a6ff;
     }
 
     .session-item {
@@ -410,6 +444,7 @@
 
       /* 16px inputs stop iOS Safari from zooming the page on focus */
       #new-session-form input,
+      .token-form input,
       .xterm .xterm-helper-textarea {
         font-size: 16px;
       }
@@ -514,6 +549,16 @@
         background: #1f6feb;
         border-color: #58a6ff;
         color: white;
+      }
+    }
+
+    /* Installed (standalone) app: the status bar overlays the page, so pad the
+       header on every layout, not only the phone one (env() is 0 elsewhere) */
+    @media (display-mode: standalone) {
+      header {
+        padding-top: calc(1rem + env(safe-area-inset-top));
+        padding-left: calc(2rem + env(safe-area-inset-left));
+        padding-right: calc(2rem + env(safe-area-inset-right));
       }
     }
 
