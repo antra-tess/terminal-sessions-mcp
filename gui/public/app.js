@@ -282,6 +282,7 @@ async function selectSession(sessionId, event) {
   if (currentSession === sessionId) return;
   
   currentSession = sessionId;
+  currentSessionAlive = true;
   
   // Update UI
   document.querySelectorAll('.session-item').forEach(item => {
@@ -303,7 +304,50 @@ async function selectSession(sessionId, event) {
   
   // Subscribe to session updates
   socket.emit('subscribe', sessionId);
+  
+  // The replayed history may not match what the program believes is on
+  // screen (it draws by diff); ask it to repaint once we're attached.
+  scheduleRedraw();
 }
+
+// ---- Redraw: ask the foreground program to repaint its whole screen ----
+// TUIs skip cells they think are already right, so a viewer whose state
+// diverged shows holes. The server nudges the PTY size and restores it
+// (SIGWINCH -> full repaint); our own xterm grid is left alone.
+let redrawTimer = null;
+let redrawSupported = true;      // false once the session server says it has no session.redraw
+let currentSessionAlive = false; // no point nudging a PTY that has exited
+
+function scheduleRedraw(delayMs = 300) {
+  clearTimeout(redrawTimer);
+  redrawTimer = null;
+  if (!redrawSupported || !currentSessionAlive) return;
+  redrawTimer = setTimeout(() => {
+    redrawTimer = null;
+    if (currentSession && currentSessionAlive && redrawSupported && socket.connected) {
+      socket.emit('redraw', { sessionId: currentSession });
+    }
+  }, delayMs);
+}
+
+// Toolbar button
+function redrawSession() {
+  scheduleRedraw(0);
+}
+
+function syncRedrawButton() {
+  const button = document.querySelector('button.redraw');
+  if (!button) return;
+  button.disabled = !redrawSupported;
+  button.title = redrawSupported
+    ? 'Redraw: ask the program to repaint'
+    : 'Redraw needs a newer session server';
+}
+
+// A tab that was hidden may have missed frames; repaint when it comes back
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && currentSession) scheduleRedraw();
+});
 
 // Create terminal view with xterm.js
 async function createTerminalView(sessionId) {
@@ -322,6 +366,8 @@ async function createTerminalView(sessionId) {
           <button class="signal" onclick="sendSignal('SIGTSTP')" title="Ctrl+Z">^Z</button>
           <button class="signal" onclick="sendSignal('SIGTERM')" title="Terminate">TERM</button>
         </div>
+        <button class="secondary redraw" onclick="redrawSession()" title="Redraw: ask the program to repaint"
+                aria-label="Redraw">⟳</button>
         <button class="secondary" onclick="clearTerminal()">🗑️ Clear</button>
         <button class="secondary danger" onclick="killCurrentSession()">💀 Kill Session</button>
         <button class="secondary keys-toggle" onclick="toggleKeyBar()" title="Extra keys (Esc, Tab, Ctrl, arrows)"
@@ -399,6 +445,7 @@ async function createTerminalView(sessionId) {
   
   // Extra keys row (only visible on phones)
   setupKeyBar(terminal);
+  syncRedrawButton();
   
   // Expose terminal globally for screenshot functionality
   window.currentTerminal = terminal;
@@ -461,6 +508,13 @@ function setupSocketListeners() {
     }
   });
   
+  socket.on('redrawn', (data) => {
+    // The program has repainted; re-render our buffer so nothing stale lingers
+    if (currentTerminal && currentSession === data.sessionId) {
+      currentTerminal.refresh(0, currentTerminal.rows - 1);
+    }
+  });
+  
   socket.on('session:created', () => {
     loadSessions();
   });
@@ -468,7 +522,21 @@ function setupSocketListeners() {
   socket.on('session:exit', (data) => {
     loadSessions();
     if (currentSession === data.sessionId) {
+      currentSessionAlive = false;
+      clearTimeout(redrawTimer);
+      redrawTimer = null;
       currentTerminal?.writeln('\x1b[33m\n[Session ended]\x1b[0m');
+    }
+  });
+  
+  socket.on('redraw-failed', (data) => {
+    console.warn('Redraw failed:', data.message);
+    if (data.unsupported) {
+      // Session server predates session.redraw: stop asking, grey out the button
+      redrawSupported = false;
+      clearTimeout(redrawTimer);
+      redrawTimer = null;
+      syncRedrawButton();
     }
   });
   

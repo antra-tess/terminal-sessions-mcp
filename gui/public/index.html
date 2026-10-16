@@ -332,6 +332,18 @@
       display: inline-block;
     }
 
+    /* ⟳ asks the foreground program to repaint */
+    button.redraw {
+      padding: 0.25rem 0.5rem;
+      font-size: 1rem;
+      line-height: 1;
+    }
+
+    button.redraw:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
     /* ⌨ toggles the extra keys row */
     button.keys-toggle {
       padding: 0.25rem 0.5rem;

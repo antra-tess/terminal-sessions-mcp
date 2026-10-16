@@ -26,6 +26,15 @@
   remembered). The terminal refits through a `ResizeObserver` on every layout
   and the PTY is only resized when the column/row grid actually changes.
   Installing as an app also works in desktop Chrome/Edge over https/localhost.
+- **Web GUI: Redraw** ⟳ - TUIs such as Claude Code draw by diff and skip cells
+  they believe are already on screen, so a viewer whose terminal state has
+  diverged (attached mid-stream, history replayed at another width, dropped
+  frames) shows holes in the picture. A ⟳ button in the terminal header asks
+  the program to repaint: the new `session.redraw` API nudges the PTY by one
+  row and restores it (the program gets SIGWINCH), serialized with real
+  resizes so the PTY never stays at the wrong size. The GUI also redraws
+  automatically after attaching to a session and when the tab becomes
+  visible again.
 
 ## v1.6.0 - 2026-07-11
 
