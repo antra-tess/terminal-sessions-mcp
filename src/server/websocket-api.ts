@@ -8,6 +8,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { createServer } from 'http';
 import { EventEmitter } from 'events';
 import { PersistentSessionServer } from './session-server-v3';
+import { assertEnterDelayHonoured } from './keys';
 
 interface APIMessage {
   id: string;
@@ -186,8 +187,14 @@ export class SessionAPI {
           break;
           
         case 'session.input':
-          this.server.sendInput(params.sessionId, params.input, params.appendNewline, params.keys);
-          result = { success: true };
+          await this.server.sendInput(
+            params.sessionId, params.input, params.appendNewline, params.keys, params.enterDelayMs
+          );
+          // Echo enterDelayMs so clients can tell this server honoured it
+          // (older servers return a bare { success: true }).
+          result = params.enterDelayMs === undefined
+            ? { success: true }
+            : { success: true, enterDelayMs: params.enterDelayMs };
           break;
           
         case 'session.signal':
@@ -484,8 +491,10 @@ export class SessionClient extends EventEmitter {
     return this.request('service.start', params);
   }
   
-  async sendInput(sessionId: string, input: string, appendNewline?: boolean, keys?: string[]) {
-    return this.request('session.input', { sessionId, input, appendNewline, keys });
+  async sendInput(sessionId: string, input: string, appendNewline?: boolean, keys?: string[], enterDelayMs?: number) {
+    const result = await this.request('session.input', { sessionId, input, appendNewline, keys, enterDelayMs });
+    assertEnterDelayHonoured(result, { input, appendNewline, keys, enterDelayMs });
+    return result;
   }
   
   async sendSignal(sessionId: string, signal: string = 'SIGINT') {

@@ -1,4 +1,5 @@
 import { EventEmitter } from 'events';
+import { assertEnterDelayHonoured } from '../server/keys';
 
 interface PendingRequest {
   resolve: (value: any) => void;
@@ -254,8 +255,10 @@ export class RobustSessionClient extends EventEmitter {
     return this.request('service.start', params);
   }
   
-  async sendInput(sessionId: string, input: string, appendNewline?: boolean, keys?: string[]) {
-    return this.request('session.input', { sessionId, input, appendNewline, keys });
+  async sendInput(sessionId: string, input: string, appendNewline?: boolean, keys?: string[], enterDelayMs?: number) {
+    const result = await this.request('session.input', { sessionId, input, appendNewline, keys, enterDelayMs });
+    assertEnterDelayHonoured(result, { input, appendNewline, keys, enterDelayMs });
+    return result;
   }
   
   async sendSignal(sessionId: string, signal: string = 'SIGINT') {

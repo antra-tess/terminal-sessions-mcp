@@ -284,11 +284,12 @@ export class ConnectomeTestingMCP {
     input: string;
     appendNewline?: boolean;
     keys?: string[];
+    enterDelayMs?: number;
   }): Promise<{ success: boolean; error?: string }> {
     try {
       const sessionId = this.serviceMap.get(params.session) || params.session;
       await this.withConnectionRetry(() =>
-        this.getClient().sendInput(sessionId, params.input, params.appendNewline, params.keys)
+        this.getClient().sendInput(sessionId, params.input, params.appendNewline, params.keys, params.enterDelayMs)
       );
       return { success: true };
     } catch (error: any) {

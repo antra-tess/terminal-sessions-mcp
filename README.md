@@ -276,6 +276,21 @@ correct for both canonical-mode shells and raw-mode TUIs). It defaults to
 **true** when `keys` is absent, and **false** when `keys` is given (the caller
 controls the exact bytes; pass `appendNewline: true` explicitly to add Enter).
 
+`enterDelayMs` (optional, 0–5000) sends that Enter as a **separate write** the
+given number of milliseconds after the text, instead of in the same write.
+Some TUIs — Claude Code's composer, for example — treat a fast, long chunk as a
+paste and don't act on a `\r` that arrives together with it; a short pause
+before Enter makes them submit. The call returns after the Enter was written.
+The delay also applies to keys: with `keys: ["Enter"]` (or any keys after
+text) the text goes first and the keys follow after the delay. A `runCommand`
+or `launch` issued while an Enter is pending waits for it. Default behaviour
+(no delay, one write) is unchanged.
+
+```jsonc
+// Type a prompt into Claude Code and submit it reliably
+{ "session": "claude", "input": "Summarise the failing tests", "enterDelayMs": 150 }
+```
+
 ### Log Operations
 - **tailLogs** - Get recent logs from a session
 - **searchLogs** - Search logs with regex patterns and context
