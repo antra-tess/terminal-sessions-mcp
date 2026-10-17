@@ -228,6 +228,23 @@ export class WebGUIServer {
         }
       });
 
+      // Ask the foreground program to repaint (PTY size nudge, see src/server/redraw.ts)
+      socket.on('redraw', async (data: { sessionId: string }) => {
+        try {
+          const size = await this.sessionClient.redrawSession(data.sessionId);
+          socket.emit('redrawn', { sessionId: data.sessionId, ...size });
+        } catch (error: any) {
+          // Not worth a modal: the session may just have ended, or the session
+          // server predates session.redraw (the GUI then stops asking).
+          const message = error?.message || String(error);
+          socket.emit('redraw-failed', {
+            sessionId: data.sessionId,
+            message,
+            unsupported: /Unknown method/i.test(message)
+          });
+        }
+      });
+
       socket.on('disconnect', () => {
         console.log('[WebGUI] Client disconnected:', socket.id);
       });

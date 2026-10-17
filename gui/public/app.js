@@ -1,30 +1,261 @@
 // Terminal Sessions Web GUI Client
 
-// Extract token from URL query string
+// Auth token: from the URL (?token=...), otherwise the one remembered from a
+// previous visit. An installed home-screen app opens start_url without the
+// query, so the token is kept in localStorage; see resolveAuthToken().
+const TOKEN_STORAGE_KEY = 'terminal-sessions.token';
 const urlParams = new URLSearchParams(window.location.search);
-const authToken = urlParams.get('token');
+const authToken = resolveAuthToken();
+
+function resolveAuthToken() {
+  const fromUrl = urlParams.get('token');
+  if (fromUrl) {
+    try { localStorage.setItem(TOKEN_STORAGE_KEY, fromUrl); } catch (e) { /* storage unavailable */ }
+    return fromUrl;
+  }
+  try { return localStorage.getItem(TOKEN_STORAGE_KEY); } catch (e) { return null; }
+}
+
+function readStoredToken() {
+  try { return localStorage.getItem(TOKEN_STORAGE_KEY); } catch (e) { return null; }
+}
+
+function forgetStoredToken() {
+  try { localStorage.removeItem(TOKEN_STORAGE_KEY); } catch (e) { /* storage unavailable */ }
+}
+
+// Shown when the server answers 401. An installed iOS home-screen app has its
+// own storage (nothing is copied from Safari), so this is how it gets its token.
+function showTokenPrompt(container) {
+  if (document.getElementById('token-form')) return;  // keep what the user is typing
+  container.innerHTML = `
+    <form id="token-form" class="token-form" onsubmit="return submitToken(event)">
+      <p>Unauthorized. Paste the server's access token to connect:</p>
+      <input type="password" id="token-input" placeholder="token" autocomplete="off" autocapitalize="off" spellcheck="false" />
+      <button type="submit">Connect</button>
+    </form>
+  `;
+}
+
+function submitToken(event) {
+  event.preventDefault();
+  const token = document.getElementById('token-input').value.trim();
+  if (!token) return false;
+  try { localStorage.setItem(TOKEN_STORAGE_KEY, token); } catch (e) { /* storage unavailable */ }
+  // Reload without any stale ?token= so the stored one is used by the REST
+  // calls and the socket.io handshake alike
+  const url = new URL(window.location.href);
+  url.searchParams.delete('token');
+  window.location.replace(url.href);
+  return false;
+}
 
 const socket = io({ query: { token: authToken } });
 let currentTerminal = null;
 let currentSession = null;
+// Tears down resize listeners/observers of the current terminal view
+let currentTerminalCleanup = null;
 const sessions = new Map();
+
+// The media query that switches to the phone layout (defined in index.html, next to the CSS)
+const MOBILE_LAYOUT_QUERY = window.MOBILE_LAYOUT_QUERY || '(max-width: 768px), (max-height: 500px)';
+const mobileLayoutMedia = window.matchMedia(MOBILE_LAYOUT_QUERY);
+
+function isMobileLayout() {
+  return mobileLayoutMedia.matches;
+}
+
+// Remembered UI preferences (per browser): desktop sidebar collapsed, extra keys row shown.
+// Read by the inline script in index.html, written here.
+const SIDEBAR_STORAGE_KEY = 'terminal-sessions.sidebar';
+const KEYS_STORAGE_KEY = 'terminal-sessions.keys';
+
+function writePreference(key, value) {
+  try { localStorage.setItem(key, value); } catch (e) { /* storage unavailable */ }
+}
+
+function readPreference(key) {
+  try { return localStorage.getItem(key); } catch (e) { return null; }
+}
+
+// Body classes for the preferences are set by the inline script at the top of
+// <body> (before first paint). Re-run it when the layout changes so the keys
+// row default follows the breakpoint until the user picks explicitly.
+function refreshPreferenceDefaults() {
+  if (typeof window.applyStoredPreferences === 'function') window.applyStoredPreferences();
+  syncKeysToggle();
+}
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
   loadSessions();
   setupSocketListeners();
+  setupMobileLayout();
+  registerServiceWorker();
   
   // Refresh sessions every 5 seconds
   setInterval(loadSessions, 5000);
 });
 
+// Service workers only exist in a secure context (https or localhost). The GUI
+// is usually reached over plain http on a VPN address, where this is a no-op;
+// nothing else depends on the worker, it only caches the app shell.
+function registerServiceWorker() {
+  if (!window.isSecureContext || !('serviceWorker' in navigator)) return;
+  navigator.serviceWorker.register('/sw.js').catch(error => {
+    console.warn('[PWA] Service worker not registered:', error);
+  });
+}
+
+// ---- Mobile layout: session list as a drawer, viewport-height tracking ----
+
+function setupMobileLayout() {
+  // On a phone the list is hidden behind a drawer, so show it until a session is picked
+  if (isMobileLayout() && !currentSession) {
+    openSidebar({ focus: false });
+  }
+
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !document.getElementById('redraw-popover')?.hidden) {
+      closeRedrawMenu();
+      return;
+    }
+    if (e.key === 'Escape' && document.body.classList.contains('sidebar-open')) {
+      closeSidebar();
+    }
+  });
+
+  // iOS Safari: the on-screen keyboard shrinks the visual viewport, not the
+  // layout viewport. Size the app to the visual viewport so the terminal stays
+  // above the keyboard and refits (the container ResizeObserver picks it up).
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', syncViewportHeight);
+    window.visualViewport.addEventListener('scroll', syncViewportHeight);
+  }
+  const onLayoutChange = () => {
+    syncViewportHeight();
+    if (!isMobileLayout()) closeSidebar();
+    refreshPreferenceDefaults();
+    syncSidebarToggle();
+  };
+  if (mobileLayoutMedia.addEventListener) {
+    mobileLayoutMedia.addEventListener('change', onLayoutChange);
+  } else {
+    mobileLayoutMedia.addListener(onLayoutChange);
+  }
+  window.addEventListener('orientationchange', () => setTimeout(syncViewportHeight, 300));
+  syncViewportHeight();
+  syncSidebarToggle();
+}
+
+// aria-expanded on ☰ reflects the drawer on phones and the collapsed state on desktop
+function syncSidebarToggle() {
+  const expanded = isMobileLayout()
+    ? document.body.classList.contains('sidebar-open')
+    : !document.body.classList.contains('sidebar-collapsed');
+  document.getElementById('sidebar-toggle')?.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+}
+
+// Desktop: hide/show the sidebar column (remembered); the terminal refits via its ResizeObserver
+function setSidebarCollapsed(collapsed) {
+  document.body.classList.toggle('sidebar-collapsed', collapsed);
+  writePreference(SIDEBAR_STORAGE_KEY, collapsed ? 'collapsed' : 'expanded');
+  syncSidebarToggle();
+}
+
+function syncKeysToggle() {
+  const show = document.body.classList.contains('show-keys');
+  document.querySelectorAll('.keys-toggle').forEach(b => b.setAttribute('aria-pressed', show ? 'true' : 'false'));
+  if (!show) setCtrlArmed(false);
+}
+
+function toggleKeyBar() {
+  const show = !document.body.classList.contains('show-keys');
+  document.body.classList.toggle('show-keys', show);
+  writePreference(KEYS_STORAGE_KEY, show ? 'on' : 'off');
+  syncKeysToggle();
+  currentTerminal?.focus();
+}
+
+function syncViewportHeight() {
+  const vv = window.visualViewport;
+  const root = document.documentElement;
+  if (!isMobileLayout() || !vv) {
+    document.body.style.height = '';
+    root.style.removeProperty('--app-height');
+    return;
+  }
+  const height = Math.round(vv.height);
+  if (height > 0) {
+    document.body.style.height = height + 'px';
+    // Also consumed by the fixed-position drawer, which ignores body height
+    root.style.setProperty('--app-height', height + 'px');
+  }
+  // Keep the fixed layout pinned to the top when the keyboard pushes the page up
+  if (window.scrollY || window.scrollX) {
+    window.scrollTo(0, 0);
+  }
+}
+
+// Everything behind the open drawer: no focus or clicks until it closes
+function setBackgroundInert(inert) {
+  document.querySelectorAll('header, .content').forEach(el => { el.inert = inert; });
+}
+
+function openSidebar({ focus = true } = {}) {
+  if (!isMobileLayout()) {
+    setSidebarCollapsed(false);
+    return;
+  }
+  if (document.body.classList.contains('sidebar-open')) return;
+  document.body.classList.add('sidebar-open');
+  document.getElementById('sidebar-toggle')?.setAttribute('aria-expanded', 'true');
+  setBackgroundInert(true);
+  if (focus) {
+    document.querySelector('.sidebar-close')?.focus({ preventScroll: true });
+  }
+}
+
+function closeSidebar() {
+  if (!document.body.classList.contains('sidebar-open')) return;
+  document.body.classList.remove('sidebar-open');
+  document.getElementById('sidebar-toggle')?.setAttribute('aria-expanded', 'false');
+  setBackgroundInert(false);
+  // Hand focus back to the toggle unless it moved elsewhere (e.g. into the terminal)
+  if (document.activeElement === document.body || document.getElementById('sidebar')?.contains(document.activeElement)) {
+    document.getElementById('sidebar-toggle')?.focus({ preventScroll: true });
+  }
+}
+
+function toggleSidebar() {
+  if (!isMobileLayout()) {
+    setSidebarCollapsed(!document.body.classList.contains('sidebar-collapsed'));
+  } else if (document.body.classList.contains('sidebar-open')) {
+    closeSidebar();
+  } else {
+    openSidebar();
+  }
+}
+
+// Smaller font on narrow phones so a usable number of columns fits
+function preferredFontSize() {
+  return window.innerWidth <= 480 ? 13 : 14;
+}
+
 // Load sessions list
 async function loadSessions() {
   try {
     const response = await fetch(`/api/sessions?token=${authToken}`);
-    const sessionsList = await response.json();
-    
     const container = document.getElementById('sessions-list');
+    
+    if (response.status === 401) {
+      // Only forget the token this page used; another tab may have saved a newer one
+      if (authToken && readStoredToken() === authToken) forgetStoredToken();
+      showTokenPrompt(container);
+      return;
+    }
+    
+    const sessionsList = await response.json();
     
     if (sessionsList.length === 0) {
       container.innerHTML = '<div style="padding: 1rem; opacity: 0.5; text-align: center;">No active sessions</div>';
@@ -55,9 +286,11 @@ async function loadSessions() {
 
 // Select and view a session
 async function selectSession(sessionId, event) {
+  if (isMobileLayout()) closeSidebar();
   if (currentSession === sessionId) return;
   
   currentSession = sessionId;
+  currentSessionAlive = true;
   
   // Update UI
   document.querySelectorAll('.session-item').forEach(item => {
@@ -79,17 +312,126 @@ async function selectSession(sessionId, event) {
   
   // Subscribe to session updates
   socket.emit('subscribe', sessionId);
+  
+  // The replayed history may not match what the program believes is on
+  // screen (it draws by diff). With "Auto-redraw on open" enabled, ask it to
+  // repaint once we're attached; by default the user presses ⟳ when needed.
+  scheduleRedraw(300, { automatic: true });
 }
+
+// ---- Redraw: ask the foreground program to repaint its whole screen ----
+// TUIs skip cells they think are already right, so a viewer whose state
+// diverged shows holes. The server nudges the PTY size and restores it
+// (SIGWINCH -> full repaint); our own xterm grid is left alone.
+let redrawTimer = null;
+let redrawSupported = true;      // false once the session server says it has no session.redraw
+let currentSessionAlive = false; // no point nudging a PTY that has exited
+let manualRedraws = 0;           // presses of ⟳ in this page session (for the one-time hint)
+
+// "Auto-redraw on open": repaint by itself after attaching to a session and
+// when the tab becomes visible again. Off by default: the repaint makes the
+// screen jump briefly, which is fine on demand but unpleasant on every switch.
+const AUTO_REDRAW_STORAGE_KEY = 'terminal-sessions.autoredraw';
+const AUTO_REDRAW_HINT_KEY = 'terminal-sessions.autoredraw-hint';
+
+function isAutoRedrawOn() {
+  return readPreference(AUTO_REDRAW_STORAGE_KEY) === 'on';
+}
+
+function setAutoRedraw(on) {
+  writePreference(AUTO_REDRAW_STORAGE_KEY, on ? 'on' : 'off');
+  syncRedrawButton();
+}
+
+function scheduleRedraw(delayMs = 300, { automatic = false } = {}) {
+  clearTimeout(redrawTimer);
+  redrawTimer = null;
+  if (!redrawSupported || !currentSessionAlive) return;
+  if (automatic && !isAutoRedrawOn()) return;
+  redrawTimer = setTimeout(() => {
+    redrawTimer = null;
+    if (currentSession && currentSessionAlive && redrawSupported && socket.connected) {
+      // The bridge answers `redrawn` (PTY size) once the nudge is undone; the
+      // program's repaint then arrives through the normal output stream.
+      socket.emit('redraw', { sessionId: currentSession });
+    }
+  }, delayMs);
+}
+
+// Toolbar button
+function redrawSession() {
+  scheduleRedraw(0);
+  manualRedraws++;
+  // Third manual press with auto off: offer the setting once, then never again
+  if (manualRedraws === 3 && !isAutoRedrawOn() && readPreference(AUTO_REDRAW_HINT_KEY) !== 'done') {
+    openRedrawMenu({ hint: true });
+  }
+}
+
+function syncRedrawButton() {
+  const button = document.querySelector('button.redraw');
+  if (!button) return;
+  button.disabled = !redrawSupported;
+  button.title = redrawSupported
+    ? 'Redraw: ask the program to repaint'
+    : 'Redraw needs a newer session server';
+  const menu = document.querySelector('button.redraw-menu');
+  if (menu) menu.disabled = !redrawSupported;
+  const toggle = document.getElementById('auto-redraw-toggle');
+  if (toggle) toggle.checked = isAutoRedrawOn();
+}
+
+// Small popover under ⟳ (the ▾ next to it, or right-click on ⟳) with the
+// "Auto-redraw on open" checkbox; also hosts the one-time hint.
+function openRedrawMenu({ hint = false } = {}) {
+  const popover = document.getElementById('redraw-popover');
+  if (!popover) return;
+  syncRedrawButton();
+  const hintRow = document.getElementById('redraw-hint');
+  if (hintRow) hintRow.hidden = !hint;
+  popover.hidden = false;
+  document.querySelector('button.redraw-menu')?.setAttribute('aria-expanded', 'true');
+  if (!hint) document.getElementById('auto-redraw-toggle')?.focus();
+}
+
+function closeRedrawMenu() {
+  const popover = document.getElementById('redraw-popover');
+  if (!popover || popover.hidden) return;
+  popover.hidden = true;
+  document.querySelector('button.redraw-menu')?.setAttribute('aria-expanded', 'false');
+}
+
+function toggleRedrawMenu(event) {
+  event?.preventDefault();
+  const popover = document.getElementById('redraw-popover');
+  if (!popover) return;
+  if (popover.hidden) openRedrawMenu(); else closeRedrawMenu();
+}
+
+function answerRedrawHint(yes) {
+  writePreference(AUTO_REDRAW_HINT_KEY, 'done');
+  if (yes) setAutoRedraw(true);
+  closeRedrawMenu();
+  currentTerminal?.focus();
+}
+
+// Close the popover on a click elsewhere or Escape
+document.addEventListener('pointerdown', (e) => {
+  const group = document.querySelector('.redraw-group');
+  if (group && !group.contains(e.target)) closeRedrawMenu();
+});
+
+// A tab that was hidden may have missed frames; with auto-redraw on, repaint when it comes back
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && currentSession) scheduleRedraw(300, { automatic: true });
+});
 
 // Create terminal view with xterm.js
 async function createTerminalView(sessionId) {
   const content = document.getElementById('content');
   
   // Clear current terminal
-  if (currentTerminal) {
-    currentTerminal.dispose();
-    currentTerminal = null;
-  }
+  disposeCurrentTerminal();
   
   // Create new terminal UI
   content.innerHTML = `
@@ -101,12 +443,38 @@ async function createTerminalView(sessionId) {
           <button class="signal" onclick="sendSignal('SIGTSTP')" title="Ctrl+Z">^Z</button>
           <button class="signal" onclick="sendSignal('SIGTERM')" title="Terminate">TERM</button>
         </div>
+        <span class="redraw-group">
+          <button class="secondary redraw" onclick="redrawSession()" oncontextmenu="toggleRedrawMenu(event)"
+                  title="Redraw: ask the program to repaint" aria-label="Redraw">⟳</button>
+          <button class="secondary redraw-menu" onclick="toggleRedrawMenu(event)" title="Redraw options"
+                  aria-label="Redraw options" aria-haspopup="dialog" aria-expanded="false">▾</button>
+          <div class="redraw-popover" id="redraw-popover" role="dialog" aria-label="Redraw options" hidden>
+            <label><input type="checkbox" id="auto-redraw-toggle" onchange="setAutoRedraw(this.checked)"> Auto-redraw on open</label>
+            <p>Repaint by itself when a session is opened or the tab becomes visible again. The screen jumps briefly each time.</p>
+            <div class="redraw-hint" id="redraw-hint" hidden>
+              <span>Turn on auto-redraw?</span>
+              <button type="button" onclick="answerRedrawHint(true)">Yes</button>
+              <button type="button" class="secondary" onclick="answerRedrawHint(false)">No</button>
+            </div>
+          </div>
+        </span>
         <button class="secondary" onclick="clearTerminal()">🗑️ Clear</button>
         <button class="secondary danger" onclick="killCurrentSession()">💀 Kill Session</button>
+        <button class="secondary keys-toggle" onclick="toggleKeyBar()" title="Extra keys (Esc, Tab, Ctrl, arrows)"
+                aria-label="Toggle extra keys" aria-pressed="${document.body.classList.contains('show-keys')}">⌨️ Keys</button>
       </div>
     </div>
     <div id="terminal-container">
       <div id="terminal"></div>
+    </div>
+    <div class="key-bar" id="key-bar" aria-label="Extra keys">
+      <button type="button" data-key="esc">Esc</button>
+      <button type="button" data-key="tab">Tab</button>
+      <button type="button" data-key="ctrl" id="key-ctrl" aria-pressed="false">Ctrl</button>
+      <button type="button" data-key="left" aria-label="Left arrow">←</button>
+      <button type="button" data-key="up" aria-label="Up arrow">↑</button>
+      <button type="button" data-key="down" aria-label="Down arrow">↓</button>
+      <button type="button" data-key="right" aria-label="Right arrow">→</button>
     </div>
   `;
   
@@ -134,7 +502,7 @@ async function createTerminalView(sessionId) {
       brightWhite: '#f0f6fc'
     },
     fontFamily: '"Cascadia Code", "Fira Code", "Monaco", "Menlo", "Ubuntu Mono", monospace',
-    fontSize: 14,
+    fontSize: preferredFontSize(),
     cursorBlink: true,
     convertEol: true,
     scrollback: 10000,
@@ -159,19 +527,15 @@ async function createTerminalView(sessionId) {
     rows: terminal.rows
   });
   
-  // Handle window resize
-  window.addEventListener('resize', () => {
-    fitAddon.fit();
-    // Update PTY size when terminal is resized
-    socket.emit('resize', {
-      sessionId: currentSession,
-      cols: terminal.cols,
-      rows: terminal.rows
-    });
-  });
+  // Refit on window resize, rotation, drawer/keyboard changes (container size)
+  currentTerminalCleanup = setupTerminalResize(terminal, fitAddon, sessionId);
   
   // Store terminal reference
   currentTerminal = terminal;
+  
+  // Extra keys row (only visible on phones)
+  setupKeyBar(terminal);
+  syncRedrawButton();
   
   // Expose terminal globally for screenshot functionality
   window.currentTerminal = terminal;
@@ -179,6 +543,7 @@ async function createTerminalView(sessionId) {
   // Enable keyboard input - forward all key presses to the session
   terminal.onData(data => {
     if (currentSession) {
+      data = applyStickyCtrl(data);
       // Debug: log to see if mouse events are being captured
       if (data.charCodeAt(0) === 27) {  // ESC character - mouse events start with ESC
         console.log('[Mouse/Special] Data:', data.split('').map(c => c.charCodeAt(0)));
@@ -240,7 +605,21 @@ function setupSocketListeners() {
   socket.on('session:exit', (data) => {
     loadSessions();
     if (currentSession === data.sessionId) {
+      currentSessionAlive = false;
+      clearTimeout(redrawTimer);
+      redrawTimer = null;
       currentTerminal?.writeln('\x1b[33m\n[Session ended]\x1b[0m');
+    }
+  });
+  
+  socket.on('redraw-failed', (data) => {
+    console.warn('Redraw failed:', data.message);
+    if (data.unsupported) {
+      // Session server predates session.redraw: stop asking, grey out the button
+      redrawSupported = false;
+      clearTimeout(redrawTimer);
+      redrawTimer = null;
+      syncRedrawButton();
     }
   });
   
@@ -352,8 +731,7 @@ function killCurrentSession() {
   });
   
   // Clear UI
-  currentTerminal?.dispose();
-  currentTerminal = null;
+  disposeCurrentTerminal();
   currentSession = null;
   
   document.getElementById('content').innerHTML = `
@@ -362,10 +740,146 @@ function killCurrentSession() {
         <path d="M0 2a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V2zm9.5 10.5H2V4h12v8.5H9.5z"/>
       </svg>
       <p>Session killed</p>
+      <button class="secondary show-sessions" onclick="openSidebar()">Show sessions</button>
     </div>
   `;
   
   // Refresh sessions list
   setTimeout(loadSessions, 500);
+}
+
+// Dispose the active xterm instance and its resize listeners
+function disposeCurrentTerminal() {
+  if (currentTerminalCleanup) {
+    currentTerminalCleanup();
+    currentTerminalCleanup = null;
+  }
+  if (currentTerminal) {
+    currentTerminal.dispose();
+    currentTerminal = null;
+  }
+  ctrlArmed = false;
+}
+
+// Keep xterm sized to its container and tell the PTY when the grid changes
+function setupTerminalResize(terminal, fitAddon, sessionId) {
+  let lastCols = terminal.cols;
+  let lastRows = terminal.rows;
+  let frame = null;
+  let settle = null;
+  
+  const refit = () => {
+    frame = null;
+    if (terminal !== currentTerminal) return;
+    const container = document.getElementById('terminal-container');
+    if (!container || container.clientWidth === 0 || container.clientHeight === 0) return;
+    
+    const fontSize = preferredFontSize();
+    if (terminal.options.fontSize !== fontSize) {
+      terminal.options.fontSize = fontSize;
+    }
+    fitAddon.fit();
+    
+    if (terminal.cols !== lastCols || terminal.rows !== lastRows) {
+      lastCols = terminal.cols;
+      lastRows = terminal.rows;
+      socket.emit('resize', { sessionId, cols: terminal.cols, rows: terminal.rows });
+    }
+  };
+  
+  const schedule = () => {
+    if (frame === null) frame = requestAnimationFrame(refit);
+    // iOS reports stale sizes right at rotation; fit again once things settle
+    clearTimeout(settle);
+    settle = setTimeout(refit, 300);
+  };
+  
+  window.addEventListener('resize', schedule);
+  window.addEventListener('orientationchange', schedule);
+  
+  let observer = null;
+  const container = document.getElementById('terminal-container');
+  if (window.ResizeObserver && container) {
+    observer = new ResizeObserver(schedule);
+    observer.observe(container);
+  }
+  
+  return () => {
+    window.removeEventListener('resize', schedule);
+    window.removeEventListener('orientationchange', schedule);
+    if (observer) observer.disconnect();
+    if (frame !== null) cancelAnimationFrame(frame);
+    clearTimeout(settle);
+  };
+}
+
+// ---- Extra keys row for on-screen keyboards ----
+
+let ctrlArmed = false;
+
+const KEY_SEQUENCES = {
+  esc: '\x1b',
+  tab: '\t'
+};
+
+// Arrow keys depend on whether the app enabled application cursor mode (vim, less, ...)
+const ARROW_KEYS = { up: 'A', down: 'B', left: 'D', right: 'C' };
+
+function keySequence(terminal, key) {
+  if (ARROW_KEYS[key]) {
+    const appMode = terminal.modes && terminal.modes.applicationCursorKeysMode;
+    return (appMode ? '\x1bO' : '\x1b[') + ARROW_KEYS[key];
+  }
+  return KEY_SEQUENCES[key];
+}
+
+// Next printable character typed after tapping "Ctrl" becomes a control character
+function applyStickyCtrl(data) {
+  if (!ctrlArmed || data.length !== 1) return data;
+  setCtrlArmed(false);
+  if (data === ' ') return '\x00';   // Ctrl+Space (NUL)
+  if (data === '?') return '\x7f';   // Ctrl+? (DEL)
+  const code = data.toUpperCase().charCodeAt(0);
+  if (code >= 0x40 && code <= 0x5f) {
+    return String.fromCharCode(code & 0x1f);
+  }
+  return data;
+}
+
+function setCtrlArmed(armed) {
+  ctrlArmed = armed;
+  const button = document.getElementById('key-ctrl');
+  if (button) {
+    button.classList.toggle('armed', armed);
+    button.setAttribute('aria-pressed', armed ? 'true' : 'false');
+  }
+}
+
+function setupKeyBar(terminal) {
+  const bar = document.getElementById('key-bar');
+  if (!bar) return;
+  
+  // Don't steal focus from the terminal, otherwise the on-screen keyboard closes
+  bar.addEventListener('pointerdown', (e) => e.preventDefault());
+  bar.addEventListener('mousedown', (e) => e.preventDefault());
+  
+  bar.addEventListener('click', (e) => {
+    const button = e.target.closest('button[data-key]');
+    if (!button || terminal !== currentTerminal || !currentSession) return;
+    
+    const key = button.dataset.key;
+    if (key === 'ctrl') {
+      setCtrlArmed(!ctrlArmed);
+    } else {
+      const seq = keySequence(terminal, key);
+      if (seq) {
+        // Mirror what xterm does for real key presses before the bytes go out
+        terminal.scrollToBottom();
+        terminal.clearSelection();
+        socket.emit('input', { sessionId: currentSession, input: seq });
+      }
+    }
+    terminal.focus();
+  });
 }
 

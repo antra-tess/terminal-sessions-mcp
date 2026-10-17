@@ -165,8 +165,14 @@ The server includes an optional web-based GUI for human operators to monitor and
 - 🎨 Beautiful GitHub-inspired dark theme
 - 🔄 Real-time output streaming
 - ⚡ Signal controls (Ctrl+C, Ctrl+Z, SIGTERM)
+- 📱 Phone layout (session drawer, full-width terminal, Esc/Tab/Ctrl/arrow keys bar) and installable as a home-screen app
+- ↔️ Collapsible sidebar (☰) and an optional extra-keys row ("⌨️ Keys") on desktop, both remembered per browser
 
 **Access:** Open `http://localhost:3200` when running with GUI enabled (default), or use `--headless` to disable.
+
+**Holes in a TUI screen?** Programs like Claude Code, vim or htop draw by diff and skip cells they believe are already correct, so a viewer whose terminal state has diverged (attached mid-stream, history replayed at another width, dropped frames) can show gaps like `M ge pull reque t`. Press ⟳ *Redraw* in the terminal header: the server nudges the PTY by one row and restores it 150 ms later, the program gets `SIGWINCH` and repaints everything, while the browser's own grid stays put. The repaint makes the screen jump briefly, so it only happens on demand; if you'd rather have it done for you, the ▾ next to ⟳ has *Auto-redraw on open* (remembered per browser), which repaints after opening a session and when the tab becomes visible again. A program that is busy during the short nudge can miss it (it only learns the size when it gets to handle the signal, and by then the size may already be back); if the screen is still wrong, press ⟳ again.
+
+**On a phone:** open the GUI URL (including `?token=...` if the server uses one) in Safari or Chrome and use *Add to Home Screen* / *Install app*. The token is remembered in the browser's local storage, so the installed app can open without it; it is forgotten again if the server rejects it. The service worker (offline app shell) only registers over `https` or `localhost`; over plain `http` on a LAN/VPN address the app still installs and works, it just always loads from the server.
 
 ## TUI Control Sequences Support
 

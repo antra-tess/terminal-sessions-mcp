@@ -213,8 +213,12 @@ export class SessionAPI {
           break;
           
         case 'session.resize':
-          this.server.resizeSession(params.sessionId, params.cols, params.rows);
+          await this.server.resizeSession(params.sessionId, params.cols, params.rows);
           result = { success: true };
+          break;
+
+        case 'session.redraw':
+          result = { success: true, ...(await this.server.redrawSession(params.sessionId)) };
           break;
           
         default:
@@ -490,6 +494,11 @@ export class SessionClient extends EventEmitter {
   
   async sendSignal(sessionId: string, signal: string = 'SIGINT') {
     return this.request('session.signal', { sessionId, signal });
+  }
+  
+  /** Make the foreground program repaint (PTY size nudge + restore). Resolves with the PTY size. */
+  async redrawSession(sessionId: string): Promise<{ cols: number; rows: number }> {
+    return this.request('session.redraw', { sessionId });
   }
   
   async getEnvironment(sessionId: string) {

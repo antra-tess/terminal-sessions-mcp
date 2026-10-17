@@ -262,6 +262,11 @@ export class RobustSessionClient extends EventEmitter {
     return this.request('session.signal', { sessionId, signal });
   }
   
+  /** Make the foreground program repaint (PTY size nudge + restore). Resolves with the PTY size. */
+  async redrawSession(sessionId: string): Promise<{ cols: number; rows: number }> {
+    return this.request('session.redraw', { sessionId });
+  }
+  
   async getEnvironment(sessionId: string) {
     return this.request('session.env', { sessionId });
   }

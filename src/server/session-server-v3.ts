@@ -16,6 +16,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { buildInputData } from './keys';
+import { performRedraw, TerminalSize } from './redraw';
 
 interface SessionInfo {
   id: string;
@@ -696,20 +697,71 @@ export class PersistentSessionServer extends EventEmitter {
     }));
   }
 
+  /** Per-session tail of in-flight resize/redraw work, so a redraw's nudge can't race a real resize. */
+  private resizeChains: Map<string, Promise<unknown>> = new Map();
+
   /**
-   * Resize a session's PTY (important for mouse support in TUI apps)
+   * Run `fn` after everything already queued for this session's PTY size.
+   * With nothing queued it runs immediately (synchronously up to its first await).
    */
-  resizeSession(sessionId: string, cols: number, rows: number): void {
+  private queueResize<T>(sessionId: string, fn: () => T | Promise<T>): Promise<T> {
+    const pending = this.resizeChains.get(sessionId);
+    let run: Promise<T>;
+    if (pending) {
+      run = pending.then(fn, fn);
+    } else {
+      try {
+        run = Promise.resolve(fn());
+      } catch (error) {
+        run = Promise.reject(error);
+      }
+    }
+    this.resizeChains.set(sessionId, run);
+    const cleanup = () => {
+      if (this.resizeChains.get(sessionId) === run) this.resizeChains.delete(sessionId);
+    };
+    run.then(cleanup, cleanup);
+    return run;
+  }
+
+  /**
+   * Resize a session's PTY (important for mouse support in TUI apps).
+   * Serialized with redrawSession: a resize that arrives while a redraw nudge
+   * is in flight is applied after the nudge is undone, so it always wins.
+   */
+  resizeSession(sessionId: string, cols: number, rows: number): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session || !session.isAlive) {
       throw new Error(`Session ${sessionId} not found or not alive`);
     }
 
-    try {
-      session.shell.resize(cols, rows);
-    } catch (error: any) {
-      throw new Error(`Failed to resize session: ${error.message}`);
+    return this.queueResize(sessionId, () => {
+      try {
+        session.shell.resize(cols, rows);
+      } catch (error: any) {
+        throw new Error(`Failed to resize session: ${error.message}`);
+      }
+    });
+  }
+
+  /**
+   * Ask the foreground program to repaint its whole screen (see redraw.ts):
+   * the PTY is nudged by one row and restored, which delivers SIGWINCH.
+   * Resolves with the (restored) PTY size.
+   */
+  redrawSession(sessionId: string): Promise<TerminalSize> {
+    const session = this.sessions.get(sessionId);
+    if (!session || !session.isAlive) {
+      throw new Error(`Session ${sessionId} not found or not alive`);
     }
+
+    return this.queueResize(sessionId, async () => {
+      try {
+        return await performRedraw(session.shell);
+      } catch (error: any) {
+        throw new Error(`Failed to redraw session: ${error.message}`);
+      }
+    });
   }
 
   /**
