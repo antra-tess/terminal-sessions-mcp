@@ -55,9 +55,10 @@
 - **`session-cli` runs with `node`** - its shebang named `ts-node`, a dev
   dependency, so the installed command failed with "No such file or
   directory" wherever `ts-node` wasn't on the PATH. It runs on Node
-  versions that can `require` an ES module (20.19 and later, 22.12 and
-  later, 23 and 24). On older ones it still stops: it loads the ESM-only
-  `strip-ansi` 7 with `require`, which predates this change.
+  versions that can `require` an ES module: from 20.19 on Node 20, from
+  22.12 on Node 22, and on 23 and 24. On older ones it still stops: it
+  loads the ESM-only `strip-ansi` 7 with `require`, which predates this
+  change.
 
 ## v1.6.1 - 2026-10-17
 

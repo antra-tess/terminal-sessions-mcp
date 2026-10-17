@@ -10,7 +10,7 @@ const { join } = require('node:path');
 const root = join(__dirname, '..');
 const { bin } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 
-test('every bin runs with node', () => {
+test("every bin's first line names node", () => {
   const names = Object.keys(bin);
   assert.ok(names.length > 0, 'package.json names its bins');
   for (const name of names) {
