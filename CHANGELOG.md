@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **`runCommand` reports why it couldn't create a session.** A failed
+  creation, such as a shared server's session limit, was swallowed, and the
+  call then answered with exec's "Session … not found". The creation's own
+  error is now the answer, unless a second listing shows that the session
+  exists after all, and then the command runs in it. A listing that fails on
+  a lost or refused connection is tried once more on a fresh one, and a
+  listing that still fails now fails the call with its error, where it used
+  to go on to create the session and run the command anyway.
+
 ## v1.6.0 - 2026-07-11
 
 ### Added

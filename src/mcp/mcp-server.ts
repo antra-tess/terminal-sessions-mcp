@@ -128,16 +128,21 @@ export class ConnectomeTestingMCP {
   }): Promise<CommandResult> {
     const sessionId = this.serviceMap.get(params.session) || params.session;
 
-    // Keep the actual creation failure (capacity, cwd, PTY, auth, ...).
-    // Falling through to exec hides it behind "Session ... not found".
-    const sessions = await this.getClient().listSessions();
+    // Create the session if it's missing, and keep the creation's own error,
+    // such as a shared server's session limit: going on to exec would hide it
+    // behind "Session ... not found". A listing that fails on a lost or
+    // refused connection is tried once more on a fresh one, as listSessions
+    // is, and a listing that still fails fails the call with its error.
+    const sessions = await this.withConnectionRetry(() => this.getClient().listSessions());
     const exists = sessions.some((s: any) => s.id === sessionId);
     if (!exists) {
       try {
         await this.createSession({ id: sessionId, cwd: params.cwd });
       } catch (creationError) {
-        // Another call may have created the same session after our list.
-        // Continue only when we can positively confirm that race.
+        // The session may exist after all, made by another call after our
+        // listing, or by this call's own create whose answer was lost. The
+        // command then runs in it. A second listing decides that, not the
+        // error's wording.
         const current = await this.getClient().listSessions().catch(() => []);
         if (!current.some((s: any) => s.id === sessionId)) throw creationError;
       }
