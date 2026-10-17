@@ -399,6 +399,12 @@
       border-top: 1px solid #30363d;
     }
 
+    /* `hidden` must win over the display rules above */
+    .redraw-popover[hidden],
+    .redraw-hint[hidden] {
+      display: none;
+    }
+
     .redraw-hint span {
       flex: 1;
     }
