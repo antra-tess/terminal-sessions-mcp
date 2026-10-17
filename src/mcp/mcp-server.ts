@@ -128,19 +128,18 @@ export class ConnectomeTestingMCP {
   }): Promise<CommandResult> {
     const sessionId = this.serviceMap.get(params.session) || params.session;
 
-    // Auto-create session if it doesn't exist
-    try {
-      const sessions = await this.getClient().listSessions();
-      const exists = sessions.some((s: any) => s.id === sessionId);
-      if (!exists) {
-        await this.createSession({ id: sessionId, cwd: params.cwd });
-      }
-    } catch {
-      // If listing fails, try to create anyway — exec will give the real error
+    // Keep the actual creation failure (capacity, cwd, PTY, auth, ...).
+    // Falling through to exec hides it behind "Session ... not found".
+    const sessions = await this.getClient().listSessions();
+    const exists = sessions.some((s: any) => s.id === sessionId);
+    if (!exists) {
       try {
         await this.createSession({ id: sessionId, cwd: params.cwd });
-      } catch {
-        // Session might already exist, continue to exec
+      } catch (creationError) {
+        // Another call may have created the same session after our list.
+        // Continue only when we can positively confirm that race.
+        const current = await this.getClient().listSessions().catch(() => []);
+        if (!current.some((s: any) => s.id === sessionId)) throw creationError;
       }
     }
 
