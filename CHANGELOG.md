@@ -31,10 +31,19 @@
   diverged (attached mid-stream, history replayed at another width, dropped
   frames) shows holes in the picture. A ⟳ button in the terminal header asks
   the program to repaint: the new `session.redraw` API nudges the PTY by one
-  row and restores it (the program gets SIGWINCH), serialized with real
-  resizes so the PTY never stays at the wrong size. The GUI also redraws
+  row and restores it 150 ms later (the program gets SIGWINCH), serialized
+  with real resizes so the PTY never stays at the wrong size. The GUI also redraws
   automatically after attaching to a session and when the tab becomes
-  visible again.
+  visible again. A program that is busy during the nudge may miss it; press
+  again.
+
+### Changed
+
+- `PersistentSessionServer.resizeSession` now returns a promise (resolved once
+  the resize has been applied, after any redraw nudge in flight). A missing
+  session still throws synchronously; a failing PTY resize now rejects the
+  promise instead of throwing, so callers should `await` it.
+- New `session.redraw` WebSocket method and `redrawSession()` on both clients.
 
 ## v1.6.0 - 2026-07-11
 

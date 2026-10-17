@@ -325,6 +325,8 @@ function scheduleRedraw(delayMs = 300) {
   redrawTimer = setTimeout(() => {
     redrawTimer = null;
     if (currentSession && currentSessionAlive && redrawSupported && socket.connected) {
+      // The bridge answers `redrawn` (PTY size) once the nudge is undone; the
+      // program's repaint then arrives through the normal output stream.
       socket.emit('redraw', { sessionId: currentSession });
     }
   }, delayMs);
@@ -505,13 +507,6 @@ function setupSocketListeners() {
         const text = data.lines.join('\r\n') + '\r\n';
         currentTerminal.write(text);
       }
-    }
-  });
-  
-  socket.on('redrawn', (data) => {
-    // The program has repainted; re-render our buffer so nothing stale lingers
-    if (currentTerminal && currentSession === data.sessionId) {
-      currentTerminal.refresh(0, currentTerminal.rows - 1);
     }
   });
   

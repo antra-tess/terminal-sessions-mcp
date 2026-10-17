@@ -20,8 +20,14 @@ export interface TerminalSize {
   rows: number;
 }
 
-/** How long the PTY stays at the nudged size before it is restored. */
-export const REDRAW_NUDGE_MS = 60;
+/**
+ * How long the PTY stays at the nudged size before it is restored.
+ * A program only learns the new size when it gets to handle SIGWINCH; one
+ * that is busy until after the restore sees no change and doesn't repaint.
+ * Measured with a program busy 150 of every 160 ms: a 60 ms hold reached it
+ * 0/20 times, 100 ms 15/20, 150 ms 20/20.
+ */
+export const REDRAW_NUDGE_MS = 150;
 
 /** The temporary size used to provoke the repaint: one row less, else one column less. */
 export function planRedrawNudge(size: TerminalSize): TerminalSize {
