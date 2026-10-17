@@ -58,20 +58,23 @@ export class ConnectomeTestingMCP {
     }
   }
   
-  // Note: withConnectionRetry is now less critical since RobustSessionClient
-  // handles reconnection automatically, but we keep it for extra safety
+  // A request whose connection is lost while it's in flight is tried once more
+  // on a fresh client. runCommand's first listing relies on it to get through
+  // a session server's restart.
   private async withConnectionRetry<T>(operation: () => Promise<T>): Promise<T> {
+    const client = this.getClient();
     try {
       return await operation();
     } catch (error: any) {
-      // The RobustSessionClient should handle most reconnection scenarios,
-      // but this provides an extra layer of safety for edge cases
       if (error.message?.includes('ECONNREFUSED') || 
           error.message?.includes('WebSocket') ||
           error.message?.includes('EPIPE') ||
           error.message?.includes('socket hang up') ||
           error.message?.includes('Connection lost')) {
-        this.resetClient();
+        // Calls that lost one connection together each come here. Only the
+        // first replaces the client: closing the one another call has just
+        // made would fail that call's request.
+        if (this.client === client) this.resetClient();
         // Try once more with a fresh connection
         return await operation();
       }
@@ -130,8 +133,8 @@ export class ConnectomeTestingMCP {
 
     // Create the session if it's missing, and keep the creation's own error,
     // such as a shared server's session limit: going on to exec would hide it
-    // behind "Session ... not found". A listing that fails on a lost or
-    // refused connection is tried once more on a fresh one, as listSessions
+    // behind "Session ... not found". A listing whose connection is lost
+    // while it's in flight is tried once more on a fresh one, as listSessions
     // is, and a listing that still fails fails the call with its error.
     const sessions = await this.withConnectionRetry(() => this.getClient().listSessions());
     const exists = sessions.some((s: any) => s.id === sessionId);
