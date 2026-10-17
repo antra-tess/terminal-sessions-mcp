@@ -339,9 +339,73 @@
       line-height: 1;
     }
 
-    button.redraw:disabled {
+    button.redraw:disabled,
+    button.redraw-menu:disabled {
       opacity: 0.4;
       cursor: not-allowed;
+    }
+
+    /* ▾ next to ⟳: popover with "Auto-redraw on open" */
+    .redraw-group {
+      position: relative;
+      display: inline-flex;
+      gap: 2px;
+    }
+
+    button.redraw-menu {
+      padding: 0.25rem 0.35rem;
+      font-size: 0.75rem;
+      line-height: 1;
+    }
+
+    .redraw-popover {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 6px);
+      width: 250px;
+      max-width: calc(100vw - 2rem);
+      padding: 0.6rem 0.75rem;
+      background: #161b22;
+      border: 1px solid #30363d;
+      border-radius: 6px;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+      font-size: 0.8rem;
+      color: #c9d1d9;
+      z-index: 20;
+      text-align: left;
+    }
+
+    .redraw-popover label {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-weight: 500;
+      cursor: pointer;
+    }
+
+    .redraw-popover p {
+      margin: 0.35rem 0 0;
+      color: #8b949e;
+      font-size: 0.75rem;
+      line-height: 1.35;
+    }
+
+    .redraw-hint {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+      margin-top: 0.6rem;
+      padding-top: 0.5rem;
+      border-top: 1px solid #30363d;
+    }
+
+    .redraw-hint span {
+      flex: 1;
+    }
+
+    .redraw-hint button {
+      padding: 0.25rem 0.6rem;
+      font-size: 0.75rem;
     }
 
     /* ⌨ toggles the extra keys row */
@@ -565,9 +629,23 @@
         gap: 0.5rem;
       }
 
-      .terminal-actions > button {
+      .terminal-actions > button,
+      .terminal-actions > .redraw-group {
         flex: 1 1 auto;
         padding: 0.5rem 0.75rem;
+      }
+
+      .terminal-actions > .redraw-group {
+        padding: 0;
+      }
+
+      .redraw-group > button {
+        flex: 1 1 auto;
+      }
+
+      .redraw-group > button.redraw-menu {
+        flex: 0 0 auto;
+        padding: 0.5rem 0.6rem;
       }
 
       .signal-buttons {

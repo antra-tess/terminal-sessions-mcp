@@ -32,10 +32,11 @@
   frames) shows holes in the picture. A ⟳ button in the terminal header asks
   the program to repaint: the new `session.redraw` API nudges the PTY by one
   row and restores it 150 ms later (the program gets SIGWINCH), serialized
-  with real resizes so the PTY never stays at the wrong size. The GUI also redraws
-  automatically after attaching to a session and when the tab becomes
-  visible again. A program that is busy during the nudge may miss it; press
-  again.
+  with real resizes so the PTY never stays at the wrong size. An optional
+  *Auto-redraw on open* setting (▾ next to ⟳, off by default, remembered per
+  browser) repaints by itself after opening a session and when the tab
+  becomes visible again; after the third manual ⟳ it is offered once. A
+  program that is busy during the nudge may miss it; press again.
 
 ### Changed
 

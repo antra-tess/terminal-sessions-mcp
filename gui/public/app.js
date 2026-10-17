@@ -74,6 +74,10 @@ function writePreference(key, value) {
   try { localStorage.setItem(key, value); } catch (e) { /* storage unavailable */ }
 }
 
+function readPreference(key) {
+  try { return localStorage.getItem(key); } catch (e) { return null; }
+}
+
 // Body classes for the preferences are set by the inline script at the top of
 // <body> (before first paint). Re-run it when the layout changes so the keys
 // row default follows the breakpoint until the user picks explicitly.
@@ -112,6 +116,10 @@ function setupMobileLayout() {
   }
 
   document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !document.getElementById('redraw-popover')?.hidden) {
+      closeRedrawMenu();
+      return;
+    }
     if (e.key === 'Escape' && document.body.classList.contains('sidebar-open')) {
       closeSidebar();
     }
@@ -306,8 +314,9 @@ async function selectSession(sessionId, event) {
   socket.emit('subscribe', sessionId);
   
   // The replayed history may not match what the program believes is on
-  // screen (it draws by diff); ask it to repaint once we're attached.
-  scheduleRedraw();
+  // screen (it draws by diff). With "Auto-redraw on open" enabled, ask it to
+  // repaint once we're attached; by default the user presses ⟳ when needed.
+  scheduleRedraw(300, { automatic: true });
 }
 
 // ---- Redraw: ask the foreground program to repaint its whole screen ----
@@ -317,11 +326,28 @@ async function selectSession(sessionId, event) {
 let redrawTimer = null;
 let redrawSupported = true;      // false once the session server says it has no session.redraw
 let currentSessionAlive = false; // no point nudging a PTY that has exited
+let manualRedraws = 0;           // presses of ⟳ in this page session (for the one-time hint)
 
-function scheduleRedraw(delayMs = 300) {
+// "Auto-redraw on open": repaint by itself after attaching to a session and
+// when the tab becomes visible again. Off by default: the repaint makes the
+// screen jump briefly, which is fine on demand but unpleasant on every switch.
+const AUTO_REDRAW_STORAGE_KEY = 'terminal-sessions.autoredraw';
+const AUTO_REDRAW_HINT_KEY = 'terminal-sessions.autoredraw-hint';
+
+function isAutoRedrawOn() {
+  return readPreference(AUTO_REDRAW_STORAGE_KEY) === 'on';
+}
+
+function setAutoRedraw(on) {
+  writePreference(AUTO_REDRAW_STORAGE_KEY, on ? 'on' : 'off');
+  syncRedrawButton();
+}
+
+function scheduleRedraw(delayMs = 300, { automatic = false } = {}) {
   clearTimeout(redrawTimer);
   redrawTimer = null;
   if (!redrawSupported || !currentSessionAlive) return;
+  if (automatic && !isAutoRedrawOn()) return;
   redrawTimer = setTimeout(() => {
     redrawTimer = null;
     if (currentSession && currentSessionAlive && redrawSupported && socket.connected) {
@@ -335,6 +361,11 @@ function scheduleRedraw(delayMs = 300) {
 // Toolbar button
 function redrawSession() {
   scheduleRedraw(0);
+  manualRedraws++;
+  // Third manual press with auto off: offer the setting once, then never again
+  if (manualRedraws === 3 && !isAutoRedrawOn() && readPreference(AUTO_REDRAW_HINT_KEY) !== 'done') {
+    openRedrawMenu({ hint: true });
+  }
 }
 
 function syncRedrawButton() {
@@ -344,11 +375,55 @@ function syncRedrawButton() {
   button.title = redrawSupported
     ? 'Redraw: ask the program to repaint'
     : 'Redraw needs a newer session server';
+  const menu = document.querySelector('button.redraw-menu');
+  if (menu) menu.disabled = !redrawSupported;
+  const toggle = document.getElementById('auto-redraw-toggle');
+  if (toggle) toggle.checked = isAutoRedrawOn();
 }
 
-// A tab that was hidden may have missed frames; repaint when it comes back
+// Small popover under ⟳ (the ▾ next to it, or right-click on ⟳) with the
+// "Auto-redraw on open" checkbox; also hosts the one-time hint.
+function openRedrawMenu({ hint = false } = {}) {
+  const popover = document.getElementById('redraw-popover');
+  if (!popover) return;
+  syncRedrawButton();
+  const hintRow = document.getElementById('redraw-hint');
+  if (hintRow) hintRow.hidden = !hint;
+  popover.hidden = false;
+  document.querySelector('button.redraw-menu')?.setAttribute('aria-expanded', 'true');
+  if (!hint) document.getElementById('auto-redraw-toggle')?.focus();
+}
+
+function closeRedrawMenu() {
+  const popover = document.getElementById('redraw-popover');
+  if (!popover || popover.hidden) return;
+  popover.hidden = true;
+  document.querySelector('button.redraw-menu')?.setAttribute('aria-expanded', 'false');
+}
+
+function toggleRedrawMenu(event) {
+  event?.preventDefault();
+  const popover = document.getElementById('redraw-popover');
+  if (!popover) return;
+  if (popover.hidden) openRedrawMenu(); else closeRedrawMenu();
+}
+
+function answerRedrawHint(yes) {
+  writePreference(AUTO_REDRAW_HINT_KEY, 'done');
+  if (yes) setAutoRedraw(true);
+  closeRedrawMenu();
+  currentTerminal?.focus();
+}
+
+// Close the popover on a click elsewhere or Escape
+document.addEventListener('pointerdown', (e) => {
+  const group = document.querySelector('.redraw-group');
+  if (group && !group.contains(e.target)) closeRedrawMenu();
+});
+
+// A tab that was hidden may have missed frames; with auto-redraw on, repaint when it comes back
 document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'visible' && currentSession) scheduleRedraw();
+  if (document.visibilityState === 'visible' && currentSession) scheduleRedraw(300, { automatic: true });
 });
 
 // Create terminal view with xterm.js
@@ -368,8 +443,21 @@ async function createTerminalView(sessionId) {
           <button class="signal" onclick="sendSignal('SIGTSTP')" title="Ctrl+Z">^Z</button>
           <button class="signal" onclick="sendSignal('SIGTERM')" title="Terminate">TERM</button>
         </div>
-        <button class="secondary redraw" onclick="redrawSession()" title="Redraw: ask the program to repaint"
-                aria-label="Redraw">⟳</button>
+        <span class="redraw-group">
+          <button class="secondary redraw" onclick="redrawSession()" oncontextmenu="toggleRedrawMenu(event)"
+                  title="Redraw: ask the program to repaint" aria-label="Redraw">⟳</button>
+          <button class="secondary redraw-menu" onclick="toggleRedrawMenu(event)" title="Redraw options"
+                  aria-label="Redraw options" aria-haspopup="dialog" aria-expanded="false">▾</button>
+          <div class="redraw-popover" id="redraw-popover" role="dialog" aria-label="Redraw options" hidden>
+            <label><input type="checkbox" id="auto-redraw-toggle" onchange="setAutoRedraw(this.checked)"> Auto-redraw on open</label>
+            <p>Repaint by itself when a session is opened or the tab becomes visible again. The screen jumps briefly each time.</p>
+            <div class="redraw-hint" id="redraw-hint" hidden>
+              <span>Turn on auto-redraw?</span>
+              <button type="button" onclick="answerRedrawHint(true)">Yes</button>
+              <button type="button" class="secondary" onclick="answerRedrawHint(false)">No</button>
+            </div>
+          </div>
+        </span>
         <button class="secondary" onclick="clearTerminal()">🗑️ Clear</button>
         <button class="secondary danger" onclick="killCurrentSession()">💀 Kill Session</button>
         <button class="secondary keys-toggle" onclick="toggleKeyBar()" title="Extra keys (Esc, Tab, Ctrl, arrows)"
