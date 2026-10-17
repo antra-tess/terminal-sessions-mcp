@@ -327,6 +327,16 @@ export class PersistentSessionServer extends EventEmitter {
     const currentCommand = session.commandQueue.shift()!;
     session.currentCommand = currentCommand;
 
+    // Don't type over a sendInput whose delayed Enter is still pending
+    const pendingInput = this.pendingInput(session.id);
+    if (pendingInput) {
+      await pendingInput;
+      if (!session.isAlive) {
+        this.resolveCommand(session, -1);
+        return;
+      }
+    }
+
     // Any temp files from previously-issued commands are safe to remove now:
     // a new command means the shell has finished sourcing the prior one.
     this.cleanupTempFiles(session);
@@ -519,8 +529,12 @@ export class PersistentSessionServer extends EventEmitter {
    * Inputs to one session are serialized: a call that arrives while another
    * call's delayed Enter is still pending is written after that Enter, so
    * concurrent callers can't splice their text into each other's line.
+   * execCommand and startService wait for a pending Enter as well.
+   *
+   * Validation (unknown session, bad delay, unknown key) throws synchronously,
+   * as before; the returned promise only reflects the writes themselves.
    */
-  async sendInput(
+  sendInput(
     sessionId: string,
     input: string,
     appendNewline?: boolean,
@@ -569,8 +583,19 @@ export class PersistentSessionServer extends EventEmitter {
     };
     run.then(cleanup, cleanup);
 
-    await run;
-    this.notify('session:input', notifyParams);
+    return run.then(() => {
+      this.notify('session:input', notifyParams);
+    });
+  }
+
+  /**
+   * Resolves once any in-flight sendInput for the session (e.g. a delayed
+   * Enter) has been written, so other writers don't splice into its line.
+   * Returns undefined when nothing is pending, so callers can stay synchronous.
+   */
+  private pendingInput(sessionId: string): Promise<void> | undefined {
+    const pending = this.inputChains.get(sessionId);
+    return pending ? pending.then(() => undefined, () => undefined) : undefined;
   }
 
   /**
@@ -616,7 +641,10 @@ export class PersistentSessionServer extends EventEmitter {
 
     const session = this.sessions.get(sessionId)!;
 
-    // Write the command (no exit-code marker — process is meant to keep running)
+    // Write the command (no exit-code marker — process is meant to keep running),
+    // after any sendInput whose delayed Enter is still pending.
+    const pendingInput = this.pendingInput(sessionId);
+    if (pendingInput) await pendingInput;
     session.shell.write(options.command + '\n');
     this.addLog(session, `$ ${options.command}`);
 

@@ -493,7 +493,7 @@ export class SessionClient extends EventEmitter {
   
   async sendInput(sessionId: string, input: string, appendNewline?: boolean, keys?: string[], enterDelayMs?: number) {
     const result = await this.request('session.input', { sessionId, input, appendNewline, keys, enterDelayMs });
-    assertEnterDelayHonoured(result, enterDelayMs);
+    assertEnterDelayHonoured(result, { input, appendNewline, keys, enterDelayMs });
     return result;
   }
   

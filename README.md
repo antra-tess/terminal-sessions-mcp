@@ -281,7 +281,10 @@ given number of milliseconds after the text, instead of in the same write.
 Some TUIs — Claude Code's composer, for example — treat a fast, long chunk as a
 paste and don't act on a `\r` that arrives together with it; a short pause
 before Enter makes them submit. The call returns after the Enter was written.
-Default behaviour (no delay, one write) is unchanged.
+The delay also applies to keys: with `keys: ["Enter"]` (or any keys after
+text) the text goes first and the keys follow after the delay. A `runCommand`
+or `launch` issued while an Enter is pending waits for it. Default behaviour
+(no delay, one write) is unchanged.
 
 ```jsonc
 // Type a prompt into Claude Code and submit it reliably

@@ -105,13 +105,15 @@ export interface PlannedWrite {
  * Plan the PTY writes for a sendInput call.
  *
  * Without `enterDelayMs` this is a single write of buildInputData(...), i.e.
- * the text and the trailing Enter go out together (unchanged behaviour).
+ * the text, the keys and the trailing Enter go out together (unchanged
+ * behaviour).
  *
- * With `enterDelayMs` set, and when Enter would be appended after a non-empty
- * body, the body is written first and '\r' goes out as a SEPARATE write
- * `enterDelayMs` later. Some TUIs (e.g. Claude Code) treat a fast, long chunk
- * as a bracketed paste and don't act on a '\r' that arrives in the same
- * write; a short pause before Enter makes them submit.
+ * With `enterDelayMs` set, and when there is text followed by keys and/or an
+ * appended Enter, the text is written first and the keys + Enter go out as a
+ * SEPARATE write `enterDelayMs` later. So an Enter given as `keys: ["Enter"]`
+ * waits just like an appended one. Some TUIs (e.g. Claude Code) treat a fast,
+ * long chunk as a bracketed paste and don't act on a '\r' that arrives in
+ * the same write; a short pause before Enter makes them submit.
  */
 export function planInputWrites(
   input: string,
@@ -120,13 +122,25 @@ export function planInputWrites(
   enterDelayMs?: number
 ): PlannedWrite[] {
   const { body, enter } = splitInputData(input, appendNewline, keys);
-  if (enterDelayMs === undefined || !enter || !body) {
-    return [{ data: body + enter, delayMs: 0 }];
+  const tail = body.slice(input.length) + enter; // decoded keys, then '\r' if appended
+  if (enterDelayMs === undefined || !tail || !input) {
+    return [{ data: input + tail, delayMs: 0 }];
   }
   return [
-    { data: body, delayMs: 0 },
-    { data: enter, delayMs: enterDelayMs }
+    { data: input, delayMs: 0 },
+    { data: tail, delayMs: enterDelayMs }
   ];
+}
+
+/** True when `enterDelayMs` changes anything for this call (text followed by keys/Enter). */
+export function enterDelayApplies(
+  input: string,
+  appendNewline?: boolean,
+  keys?: string[],
+  enterDelayMs?: number
+): boolean {
+  if (enterDelayMs === undefined || enterDelayMs === null) return false;
+  return planInputWrites(input, appendNewline, keys, enterDelayMs).length > 1;
 }
 
 /**
@@ -154,14 +168,19 @@ export async function performInputWrites(
 /**
  * A server that predates `enterDelayMs` ignores the parameter and still
  * answers { success: true }; new servers echo the value back. Fail loudly
- * instead of silently sending text+Enter in one write.
+ * instead of silently sending text+Enter in one write. Only checked when the
+ * delay would have changed anything (text followed by keys/Enter), and the
+ * error says that the input has already gone in, so callers don't resend it.
  */
-export function assertEnterDelayHonoured(result: any, enterDelayMs?: number): void {
-  if (enterDelayMs === undefined || enterDelayMs === null) return;
+export function assertEnterDelayHonoured(
+  result: any,
+  call: { input: string; appendNewline?: boolean; keys?: string[]; enterDelayMs?: number }
+): void {
+  if (!enterDelayApplies(call.input, call.appendNewline, call.keys, call.enterDelayMs)) return;
   if (!result || result.enterDelayMs === undefined) {
     throw new Error(
-      'The session server ignored enterDelayMs (it predates this option). ' +
-      'Restart/upgrade the session server, or omit enterDelayMs.'
+      'The session server ignored enterDelayMs (it predates this option) and wrote the input ' +
+      'with its Enter, so it has been sent. Restart or upgrade the session server to use the delay.'
     );
   }
 }
