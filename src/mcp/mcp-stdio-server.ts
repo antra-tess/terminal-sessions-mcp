@@ -357,17 +357,12 @@ if (process.env.MCP_DEBUG) {
 // Keep process alive
 process.stdin.resume();
 
-// Handle graceful shutdown
-process.on('SIGINT', () => {
-  if (mcp) {
-    // Close WebSocket connection if it exists
-    process.exit(0);
-  }
-});
-
-process.on('SIGTERM', () => {
-  if (mcp) {
-    // Close WebSocket connection if it exists
-    process.exit(0);
-  }
-});
+// Exit on SIGINT or SIGTERM, and when the client closes stdin (MCP's stdio
+// shutdown), whether or not a tool call has opened the session server
+// connection. Installing a signal listener removes Node's default exit for
+// that signal, so the handler must exit in every state; and once a tool call
+// has opened the WebSocket, a closed stdin alone no longer ends the process.
+const shutdown = () => process.exit(0);
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
+rl.on('close', shutdown);
