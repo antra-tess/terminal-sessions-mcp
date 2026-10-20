@@ -9,10 +9,16 @@
 import * as readline from 'readline';
 import { ConnectomeTestingMCP } from './mcp-server';
 
-// MCP revisions this server answers in. On initialize it replies with the
-// revision the client asked for when it is one of these, and with the latest
-// otherwise (MCP lifecycle: version negotiation). Replying with the latest
-// regardless turns away clients that speak only an earlier revision.
+// MCP revisions this server answers in, newest first. On initialize it replies
+// with the revision the client asked for when it is one of these, and with the
+// first, the latest, otherwise (MCP lifecycle: version negotiation). Replying
+// with the latest regardless turns away clients that speak only an earlier
+// revision. This server differs from two of them. 2025-03-26 has a receiver
+// accept JSON-RPC batches, and a batch gets no answer here, since the server
+// takes each line as one message, as the SDK's stdio transport does.
+// 2024-10-07 has no published specification, and by the SDK's compatibility
+// schema its servers sent tool results as `toolResult`, where this server
+// sends `content`.
 const SUPPORTED_PROTOCOL_VERSIONS = ['2025-06-18', '2025-03-26', '2024-11-05', '2024-10-07'];
 
 function negotiateProtocolVersion(requested: unknown): string {
