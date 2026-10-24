@@ -4,6 +4,20 @@
 
 ![Web GUI Demo](docs/screenshots/web-gui-demo.gif)
 
+## Terminal sessions 2.0, beside 1.x
+
+This package also ships **2.0**, a rearchitecture built for agents: one daemon (`termd`) that
+keeps shells alive, gives every command a run id and the exit status it observed (when a command's
+end could not be seen, the result is `lost` with the reason, never a guess), keeps a journal on
+disk of everything that happened, so history outlives the daemon, and tells an MCPL host when a
+command finishes instead of being polled. Commands run in the session's shell as one terminal
+stream, as in 1.x; a process Run keeps stdout and stderr apart. It is in [`next/`](next/README.md), with its design and
+guarantees in [`docs/redesign/DESIGN.md`](docs/redesign/DESIGN.md). Its binaries are `termd`,
+`tsm` and `tsm-shim`. Everything below is about the 1.x binaries (`terminal-sessions-mcp`,
+`session-server`, `session-gui`, `session-cli`), which run 1.x. 2.0 changes none of their code; what
+reaches them is the package manifest they share with 2.0: a narrower Node range (`engines`) and `ws`
+pinned at 8.21.3, inside 1.x's `^8.16.0`.
+
 ## Why This Matters
 
 While many AI tools offer basic command execution, Terminal Sessions MCP provides unique capabilities:
@@ -446,7 +460,7 @@ npx ts-node examples/service-management.ts
 
 ## Requirements
 
-- **Node.js** 18.x, 20.x, or 22.x LTS (Node 25+ not yet supported due to node-pty compatibility)
+- **Node.js** 20.19 or later within 20.x, or 22.12 or later within 22.x, or 24.x (`engines`: `>=20.19.0 <21 || >=22.12.0 <25.0.0`; `session-cli` requires an ES-module-only dependency, which `require` loads from those versions on; Node 21 and 22.0 to 22.11 are out; Node 25+ not yet supported due to node-pty compatibility)
 - **Headless Chrome** (via Puppeteer) for screenshots
 - **Modern browser** for web GUI (Chrome, Firefox, Safari, Edge)
 
