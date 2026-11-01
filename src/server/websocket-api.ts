@@ -7,6 +7,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer } from 'http';
 import { EventEmitter } from 'events';
+import { safeConnectionError } from '../client/websocket-client';
 import { PersistentSessionServer } from './session-server-v3';
 import { AccessOptions, RequestGuard, accessFromEnv, requestUrl, tokenMatches } from './request-guard';
 
@@ -44,11 +45,11 @@ export class SessionAPI {
   private authToken?: string;
   private guard: RequestGuard;
 
-  constructor(port: number = 3100, host: string = 'localhost', authToken?: string, access: AccessOptions = accessFromEnv()) {
+  constructor(port: number = 3100, host: string = 'localhost', authToken?: string, access: AccessOptions = accessFromEnv(), headless: boolean = false) {
     this.authToken = authToken;
     // Host/Origin check at every request and upgrade (see request-guard.ts)
     this.guard = new RequestGuard(host, () => this.httpServer?.address()?.port ?? port, !!authToken, access, 'SessionAPI');
-    this.server = new PersistentSessionServer();
+    this.server = new PersistentSessionServer(headless);
     // Let takeScreenshot authenticate against the (token-protected) web GUI
     this.server.guiAuthToken = authToken;
     this.registerServerListener('session:created', (payload) => {
@@ -424,7 +425,7 @@ export class SessionClient extends EventEmitter {
       });
       this.ws.on('error', (err: Error) => {
         if (process.env.MCP_DEBUG) {
-          console.error('[Client] Connection error:', err.message);
+          console.error('[Client] Connection error:', safeConnectionError(err, new URL(url).searchParams.get('token') ?? undefined));
         }
         reject(err);
       });

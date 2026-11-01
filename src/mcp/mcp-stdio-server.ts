@@ -6,6 +6,7 @@
  * Implements just enough of the MCP protocol to work with Cursor
  */
 
+import { readAuthToken } from '../server/auth-token';
 import * as readline from 'readline';
 import { ConnectomeTestingMCP } from './mcp-server';
 
@@ -20,6 +21,9 @@ function negotiateProtocolVersion(requested: unknown): string {
     ? requested
     : SUPPORTED_PROTOCOL_VERSIONS[0];
 }
+
+// Read once at startup, before any child can inherit authentication variables.
+const authToken = readAuthToken();
 
 // Create readline interface for stdio communication
 const rl = readline.createInterface({
@@ -50,22 +54,25 @@ function getPackageVersion(): string {
 function getMCP() {
   if (!mcp) {
     // Support full URL, or host+port separately
-    const token = process.env.SESSION_SERVER_TOKEN;
+    const token = authToken;
     const url = process.env.SESSION_SERVER_URL;
     
-    // Always log connection info for debugging
-    console.error(`[MCP] SESSION_SERVER_URL env: ${url || '(not set)'}`);
-    console.error(`[MCP] SESSION_SERVER_PORT env: ${process.env.SESSION_SERVER_PORT || '(not set)'}`);
-    console.error(`[MCP] SESSION_SERVER_HOST env: ${process.env.SESSION_SERVER_HOST || '(not set)'}`);
-    
+    // Never log connection URLs: their query or userinfo may contain secrets.
     if (url) {
-      console.error(`[MCP] Using URL: ${url}`);
+      console.error('[MCP] Connecting to configured session server');
       mcp = new ConnectomeTestingMCP(url, token);
     } else {
       const host = process.env.SESSION_SERVER_HOST || 'localhost';
       const port = process.env.SESSION_SERVER_PORT || '3100';
       const fallbackUrl = `ws://${host}:${port}`;
-      console.error(`[MCP] Using fallback URL: ${fallbackUrl}`);
+      try {
+        const parsed = new URL(fallbackUrl);
+        const parsedPort = parsed.port || '80'; // ws default, normalized by URL
+        if (!parsed.hostname || !/^\d+$/.test(parsedPort)) throw new Error();
+        console.error(`[MCP] Connecting to session server at ${parsed.hostname}:${parsedPort}`);
+      } catch {
+        console.error('[MCP] Connecting to session server (invalid address)');
+      }
       mcp = new ConnectomeTestingMCP(fallbackUrl, token);
     }
   }
@@ -366,9 +373,7 @@ rl.on('line', async (line) => {
 // Minimal startup - don't pollute stderr unless debugging
 if (process.env.MCP_DEBUG) {
   console.error('Terminal Sessions MCP Server started');
-  const url = process.env.SESSION_SERVER_URL || 
-    `ws://${process.env.SESSION_SERVER_HOST || 'localhost'}:${process.env.SESSION_SERVER_PORT || '3100'}`;
-  console.error(`Connecting to session server at: ${url}`);
+  console.error('Connecting to session server');
 }
 
 // Keep process alive

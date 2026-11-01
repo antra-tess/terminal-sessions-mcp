@@ -10,6 +10,8 @@
  *   program; start-session-server handles SIGINT and SIGTERM)
  */
 
+import { screenshotsDisabled } from './screenshot-policy';
+import { withoutAuthEnvironment } from './auth-token';
 import * as pty from 'node-pty';
 import { IPty } from 'node-pty';
 import { EventEmitter } from 'events';
@@ -409,8 +411,13 @@ export class PersistentSessionServer extends EventEmitter {
    */
   guiAuthToken?: string;
 
-  constructor() {
+  private readonly disableScreenshot: boolean;
+
+  // Retain the legacy headless argument for source compatibility. Headless only
+  // controls the bundled GUI, not access to a separately running session-gui.
+  constructor(_headless: boolean = false) {
     super();
+    this.disableScreenshot = screenshotsDisabled();
     // When the program exits, remove the sessions' temp files. An 'exit'
     // listener can't await, so this is synchronous: the async graceful path
     // would be abandoned when the event loop stops.
@@ -452,7 +459,8 @@ export class PersistentSessionServer extends EventEmitter {
 
     const shell = options.shell || (process.platform === 'win32' ? 'wsl.exe' : '/bin/bash');
     const cwd = options.cwd || process.cwd();
-    const env = { ...process.env, ...options.env };
+    // Not secure erasure, nor protection from same-UID processes.
+    const env = withoutAuthEnvironment({ ...process.env, ...options.env });
 
     // For WSL, we need to tell it to run bash in Ubuntu specifically
     const shellArgs = shell === 'wsl.exe' ? ['-d', 'Ubuntu', 'bash'] : [];
@@ -472,7 +480,7 @@ export class PersistentSessionServer extends EventEmitter {
       shell: ptyProcess,
       logs: [],
       cwd,
-      env: options.env || {},
+      env: withoutAuthEnvironment(options.env || {}) as Record<string, string>,
       isAlive: true,
       createdAt: new Date(),
       lastActivity: new Date(),
@@ -2056,7 +2064,7 @@ export class PersistentSessionServer extends EventEmitter {
    * Get environment variables for a session
    */
   async getEnvironment(sessionId: string): Promise<Record<string, string>> {
-    const result = await this.execCommand(sessionId, 'env');
+    const result = await this.execCommand(sessionId, '(unset SESSION_SERVER_TOKEN SESSION_SERVER_TOKEN_FILE; env)');
     const env: Record<string, string> = {};
     
     const lines = result.output.split('\n');
@@ -2067,7 +2075,7 @@ export class PersistentSessionServer extends EventEmitter {
       }
     }
     
-    return env;
+    return withoutAuthEnvironment(env) as Record<string, string>;
   }
 
   /**
@@ -2089,6 +2097,9 @@ export class PersistentSessionServer extends EventEmitter {
     height?: number;
     guiPort?: number;
   }): Promise<{ success: boolean; path?: string; base64?: string; error?: string }> {
+    if (this.disableScreenshot) {
+      return { success: false, error: 'session.screenshot is disabled by --disable-screenshot or SESSION_SERVER_DISABLE_SCREENSHOT' };
+    }
     try {
       const session = this.sessions.get(sessionId);
       if (!session) {
@@ -2191,7 +2202,14 @@ export class PersistentSessionServer extends EventEmitter {
         await browser.close().catch(() => {});
       }
     } catch (error: any) {
-      return { success: false, error: `Failed to screenshot via GUI: ${error.message}` };
+      // Navigation errors can include the GUI URL and its authentication query.
+      let detail = String(error.message);
+      if (this.guiAuthToken) {
+        for (const secret of [this.guiAuthToken, encodeURIComponent(this.guiAuthToken), new URLSearchParams({ token: this.guiAuthToken }).toString().slice(6)]) {
+          detail = detail.split(secret).join('[redacted]');
+        }
+      }
+      return { success: false, error: `Failed to screenshot via GUI: ${detail}` };
     }
   }
 
