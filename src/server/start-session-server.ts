@@ -4,7 +4,7 @@
  * Start the Session Server API (and optionally the GUI)
  */
 
-import { readAuthToken } from './auth-token';
+import { clearAuthEnvironment, readAuthToken } from './auth-token';
 import { SessionAPI } from './websocket-api';
 import { WebGUIServer } from '../../gui/src/server';
 import { ChildProcess, spawn } from 'child_process';
@@ -41,9 +41,8 @@ const host = getArgValue('host') || process.env.SESSION_SERVER_HOST || 'localhos
 const port = parseInt(process.env.SESSION_SERVER_PORT || '3100');
 const guiPort = parseInt(process.env.GUI_PORT || '3200');
 const tokenFile = getArgValue('token-file');
-if (args.includes('--token-file') && tokenFile === undefined) {
-  delete process.env.SESSION_SERVER_TOKEN;
-  delete process.env.SESSION_SERVER_TOKEN_FILE;
+if ((args.includes('--token-file') || args.some(a => a.startsWith('--token-file='))) && !tokenFile) {
+  clearAuthEnvironment();
   throw new Error('--token-file requires a path');
 }
 const authToken = readAuthToken(getArgValue('token'), tokenFile);

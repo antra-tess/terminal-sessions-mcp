@@ -65,7 +65,14 @@ function getMCP() {
       const host = process.env.SESSION_SERVER_HOST || 'localhost';
       const port = process.env.SESSION_SERVER_PORT || '3100';
       const fallbackUrl = `ws://${host}:${port}`;
-      console.error('[MCP] Connecting to session server');
+      try {
+        const parsed = new URL(fallbackUrl);
+        const parsedPort = parsed.port || '80'; // ws default, normalized by URL
+        if (!parsed.hostname || !/^\d+$/.test(parsedPort)) throw new Error();
+        console.error(`[MCP] Connecting to session server at ${parsed.hostname}:${parsedPort}`);
+      } catch {
+        console.error('[MCP] Connecting to session server (invalid address)');
+      }
       mcp = new ConnectomeTestingMCP(fallbackUrl, token);
     }
   }

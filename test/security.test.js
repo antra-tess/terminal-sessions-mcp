@@ -133,7 +133,9 @@ test('refused real WebSocket upgrade logs no query secrets', async () => {
   }
 });
 
-test('headless session.screenshot refuses before loading puppeteer, through the API', async () => {
+test('explicitly disabled session.screenshot refuses before loading puppeteer, through the API', async () => {
+  const previous = process.env.SESSION_SERVER_DISABLE_SCREENSHOT;
+  process.env.SESSION_SERVER_DISABLE_SCREENSHOT = 'true';
   const Module = require('node:module');
   const orig = Module._load;
   let loaded = false;
@@ -145,13 +147,18 @@ test('headless session.screenshot refuses before loading puppeteer, through the 
   try {
     await api.server.createSession('screenshot', { shell: '/bin/sh' });
     const reply = await api.handleMessage({}, { id: '1', method: 'session.screenshot', params: { sessionId: 'screenshot' } });
-    assert.match(reply.result.error, /headless/i);
+    assert.match(reply.result.error, /disabled/i);
     assert.equal(loaded, false);
     // The server path is gated as well as the API path.
     const shot = await api.server.takeScreenshot('screenshot');
-    assert.match(shot.error, /headless/i);
+    assert.match(shot.error, /disabled/i);
     assert.equal(loaded, false);
-  } finally { Module._load = orig; await api.stop(); }
+  } finally {
+    Module._load = orig;
+    if (previous === undefined) delete process.env.SESSION_SERVER_DISABLE_SCREENSHOT;
+    else process.env.SESSION_SERVER_DISABLE_SCREENSHOT = previous;
+    await api.stop();
+  }
 });
 
 function childProcess(t, script, env, args = []) {
@@ -305,7 +312,7 @@ test('invalid explicit token file refuses instead of falling back to an argv tok
     !error.message.includes(TOKEN) && !error.message.includes(argvToken));
 });
 
-test('direct WebSocket API entry honors HEADLESS without opening a listener', async t => {
+test('direct WebSocket API entry permits HEADLESS screenshots without early refusal', async t => {
   const file = fixture(t);
   const probe = path.join(path.dirname(file), 'direct-entry-probe.cjs');
   const serverModule = path.resolve('dist/src/server/session-server-v3.js');
@@ -331,5 +338,5 @@ test('direct WebSocket API entry honors HEADLESS without opening a listener', as
   assert.equal(code, 0);
   const result = JSON.parse(c.stdout());
   assert.equal(result.success, false);
-  assert.match(result.error, /headless/i);
+  assert.match(result.error, /Session absent not found/);
 });

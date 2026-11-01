@@ -1,5 +1,12 @@
 import * as fs from 'fs';
 
+const AUTH_ENVIRONMENT_KEYS = ['SESSION_SERVER_TOKEN', 'SESSION_SERVER_TOKEN_FILE'] as const;
+
+/** Remove the fixed authentication keys; this is not secure erasure. */
+export function clearAuthEnvironment(env: NodeJS.ProcessEnv = process.env): void {
+  for (const key of AUTH_ENVIRONMENT_KEYS) delete env[key];
+}
+
 /**
  * Read a validated private token file. These checks and
  * deleting environment keys are not secure erasure and do not protect against
@@ -35,15 +42,13 @@ export function readAuthToken(argvToken?: string, argvFile?: string): string | u
     const file = argvFile ?? process.env.SESSION_SERVER_TOKEN_FILE;
     return file !== undefined ? readTokenFile(file) : argvToken || process.env.SESSION_SERVER_TOKEN;
   } finally {
-    delete process.env.SESSION_SERVER_TOKEN;
-    delete process.env.SESSION_SERVER_TOKEN_FILE;
+    clearAuthEnvironment();
   }
 }
 
 /** Fixed authentication keys must never be inherited by a terminal shell. */
 export function withoutAuthEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const clean = { ...env };
-  delete clean.SESSION_SERVER_TOKEN;
-  delete clean.SESSION_SERVER_TOKEN_FILE;
+  clearAuthEnvironment(clean);
   return clean;
 }

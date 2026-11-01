@@ -77,10 +77,10 @@ browser pages from other sites: a request that carries an `Origin` must come
 from the GUI's own page, or from an origin you list with `--allow-origin`.
 Without a token, they also serve only requests addressed to `localhost`,
 `127.0.0.1`, `[::1]` or the bind address; to reach a token-less server by any
-other name, list it with `--allow-host` (or, better, use `--token`):
+other name, list it with `--allow-host` (or, better, use `--token-file`):
 ```bash
 session-server --allow-origin https://dashboard.example   # a page that drives the API from a browser
-session-server --host 0.0.0.0 --allow-host mybox.local    # token-less, LAN name (prefer --token)
+session-server --host 0.0.0.0 --allow-host mybox.local    # token-less, LAN name (prefer --token-file)
 ```
 Both flags take comma-separated values and may repeat.
 
@@ -461,6 +461,7 @@ npx ts-node examples/service-management.ts
 - `SESSION_SERVER_TOKEN` - Authentication token (optional, required for remote access by other names unless listed with `SESSION_SERVER_ALLOW_HOSTS`)
 - `SESSION_SERVER_ALLOW_HOSTS` - Comma-separated Host names (optionally `name:port`) a token-less server serves besides the loopback names (same as `--allow-host`)
 - `SESSION_SERVER_ALLOW_ORIGINS` - Comma-separated browser origins allowed besides the GUI's own page (same as `--allow-origin`)
+- `SESSION_SERVER_DISABLE_SCREENSHOT` - Explicit screenshot opt-out; exact values and CLI precedence below
 - `GUI_PORT` - Web GUI port (default: 3200)
 
 **MCP Client:**
@@ -506,7 +507,10 @@ respectively. Both backend and shim delete `SESSION_SERVER_TOKEN` and
 `SESSION_SERVER_TOKEN_FILE` from their environment after reading. Those fixed
 keys are also removed from PTY environments (including caller-provided
 overrides), stored session metadata and `session.env` results. Refused-request
-logs omit URL queries; the shim does not log connection URLs. Refusal logs also
+logs omit URL queries; the shim logs only a parsed host and numeric port for
+its host/port fallback, never the configured full URL. With `MCP_DEBUG`, client
+connection errors retain the message but strip URL queries, userinfo and the
+known token (raw, URI-encoded or form-encoded). Refusal logs also
 deliberately omit Host/Origin header values, since even malformed headers can
 carry secrets; this costs some diagnostic detail.
 
@@ -516,10 +520,36 @@ disk. They do not prevent an authenticated user or shell startup script from
 reading the file or deliberately printing secrets. Keep tokens out of commands,
 other environment keys, session names, and URL paths. Authentication still
 travels in the WebSocket URL query; use a trusted connection (or TLS) and ensure
-proxies do not log queries. In `--headless` mode, `session.screenshot` is refused
-before Puppeteer is loaded. The direct WebSocket API entry point also honors
-`HEADLESS=true`; GUI-enabled screenshot behavior is otherwise
-unchanged.
+proxies do not log queries.
+
+### Screenshot control and standalone GUI
+
+Screenshots are **enabled by default**, including with `--headless` or
+`HEADLESS=true`. Headless disables only the bundled GUI. A headless backend can
+still use a separately started `npx session-gui`; give the GUI matching backend
+connection/authentication settings and pass its port as `guiPort` to
+`session.screenshot` / `takeScreenshot` (default: 3200). Puppeteer navigates to
+`http://localhost:<guiPort>`, so the GUI must be reachable there from the backend.
+
+To explicitly refuse screenshots **before Puppeteer is required**, start with
+`session-server --disable-screenshot` or set
+`SESSION_SERVER_DISABLE_SCREENSHOT=true`. The same policy applies to the direct
+`websocket-api` executable and embedded `SessionAPI` / `PersistentSessionServer`
+instances (including the package exports). Configuration is checked when the
+server is constructed; invalid settings refuse startup before any listener.
+It is never inferred from GUI reachability or whether Chrome is installed.
+
+| CLI | `SESSION_SERVER_DISABLE_SCREENSHOT` | Result |
+| --- | --- | --- |
+| Bare `--disable-screenshot` | Any value, including invalid | Disabled (CLI wins) |
+| Absent | Exactly `true` or `1` | Disabled |
+| Absent | Exactly `false`, `0`, empty, or unset | Enabled |
+| Absent | Any other non-empty value | Startup error naming the variable |
+| Any `--disable-screenshot=<value>` (even empty or alongside the bare flag) | Any | Startup error; only the bare flag is supported |
+
+Values are case-sensitive and are **not trimmed**: `yes`, `on`, `TRUE ` and
+whitespace-only values all refuse startup. This opt-out is independent of
+authentication and of headless mode.
 
 ### Remote Connections
 

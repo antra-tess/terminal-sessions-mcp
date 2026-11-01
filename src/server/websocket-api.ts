@@ -7,6 +7,7 @@
 import { WebSocketServer, WebSocket } from 'ws';
 import { createServer } from 'http';
 import { EventEmitter } from 'events';
+import { safeConnectionError } from '../client/websocket-client';
 import { PersistentSessionServer } from './session-server-v3';
 import { AccessOptions, RequestGuard, accessFromEnv, requestUrl, tokenMatches } from './request-guard';
 
@@ -424,7 +425,7 @@ export class SessionClient extends EventEmitter {
       });
       this.ws.on('error', (err: Error) => {
         if (process.env.MCP_DEBUG) {
-          console.error('[Client] Connection error:', err.message);
+          console.error('[Client] Connection error:', safeConnectionError(err, new URL(url).searchParams.get('token') ?? undefined));
         }
         reject(err);
       });
@@ -546,7 +547,7 @@ export class SessionClient extends EventEmitter {
 
 // Start server if run directly
 if (require.main === module) {
-  const api = new SessionAPI(undefined, undefined, undefined, undefined, process.env.HEADLESS === 'true');
+  const api = new SessionAPI();
   
   process.on('SIGINT', async () => {
     console.log('\nShutting down...');

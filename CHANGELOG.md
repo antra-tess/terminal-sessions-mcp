@@ -16,8 +16,16 @@
 - **Omit query secrets from connection and refused-request logs.** Refusal logs
   deliberately omit Host/Origin values too, trading diagnostic detail for not
   disclosing arbitrary secrets in malformed headers.
-- **Refuse terminal screenshots in headless mode before loading Puppeteer.**
-  The direct WebSocket API entry point also honors `HEADLESS=true`.
+- **Restore screenshots for headless backends using a standalone GUI.**
+  Use `guiPort` to reach a separately started `session-gui`. Explicitly opt out
+  with bare `--disable-screenshot` or `SESSION_SERVER_DISABLE_SCREENSHOT=true`
+  / `1`; refusal happens before loading Puppeteer on every server entry point.
+  Invalid non-empty environment values and all `--disable-screenshot=...`
+  forms refuse startup; the bare CLI flag wins over the environment.
+- **Reject empty token-file CLI values and share authentication cleanup.**
+  Cover missing paths, equals-form paths, and equals signs inside option values.
+- **Preserve safe connection diagnostics.** Log only parsed fallback host/port
+  and sanitized debug connection errors; redact form-encoded GUI tokens too.
 
 ## v1.7.3 - 2026-10-22
 

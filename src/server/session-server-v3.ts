@@ -10,6 +10,7 @@
  *   program; start-session-server handles SIGINT and SIGTERM)
  */
 
+import { screenshotsDisabled } from './screenshot-policy';
 import { withoutAuthEnvironment } from './auth-token';
 import * as pty from 'node-pty';
 import { IPty } from 'node-pty';
@@ -410,8 +411,13 @@ export class PersistentSessionServer extends EventEmitter {
    */
   guiAuthToken?: string;
 
-  constructor(private readonly headless: boolean = false) {
+  private readonly disableScreenshot: boolean;
+
+  // Retain the legacy headless argument for source compatibility. Headless only
+  // controls the bundled GUI, not access to a separately running session-gui.
+  constructor(_headless: boolean = false) {
     super();
+    this.disableScreenshot = screenshotsDisabled();
     // When the program exits, remove the sessions' temp files. An 'exit'
     // listener can't await, so this is synchronous: the async graceful path
     // would be abandoned when the event loop stops.
@@ -2091,8 +2097,8 @@ export class PersistentSessionServer extends EventEmitter {
     height?: number;
     guiPort?: number;
   }): Promise<{ success: boolean; path?: string; base64?: string; error?: string }> {
-    if (this.headless) {
-      return { success: false, error: 'session.screenshot is unavailable in headless mode' };
+    if (this.disableScreenshot) {
+      return { success: false, error: 'session.screenshot is disabled by --disable-screenshot or SESSION_SERVER_DISABLE_SCREENSHOT' };
     }
     try {
       const session = this.sessions.get(sessionId);
@@ -2199,7 +2205,7 @@ export class PersistentSessionServer extends EventEmitter {
       // Navigation errors can include the GUI URL and its authentication query.
       let detail = String(error.message);
       if (this.guiAuthToken) {
-        for (const secret of [this.guiAuthToken, encodeURIComponent(this.guiAuthToken)]) {
+        for (const secret of [this.guiAuthToken, encodeURIComponent(this.guiAuthToken), new URLSearchParams({ token: this.guiAuthToken }).toString().slice(6)]) {
           detail = detail.split(secret).join('[redacted]');
         }
       }

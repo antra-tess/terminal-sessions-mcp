@@ -1,5 +1,19 @@
 import { EventEmitter } from 'events';
 
+/** Narrow formatter for connection-error diagnostics, not arbitrary output. */
+export function safeConnectionError(error: { message?: unknown }, token?: string): string {
+  let message = String(error.message);
+  // Strip all query contents, including non-token parameters, and URL userinfo.
+  message = message.replace(/\?[^\s<>"`]*/g, '?[redacted]')
+    .replace(/(\b(?:wss?|https?):\/\/)[^/\s]*@/gi, '$1[redacted]@');
+  if (token) {
+    for (const secret of [token, encodeURIComponent(token), new URLSearchParams({ token }).toString().slice(6)]) {
+      message = message.split(secret).join('[redacted]');
+    }
+  }
+  return message;
+}
+
 interface PendingRequest {
   resolve: (value: any) => void;
   reject: (error: Error) => void;
@@ -48,6 +62,9 @@ export class RobustSessionClient extends EventEmitter {
       this.ws = new WebSocket(connectUrl);
       this.setupEventHandlers();
     } catch (error) {
+      if (process.env.MCP_DEBUG) {
+        console.error('[RobustClient] Connection error:', safeConnectionError(error as Error, this.token));
+      }
       this.handleConnectionError(error);
     }
   }
@@ -68,7 +85,7 @@ export class RobustSessionClient extends EventEmitter {
     this.ws.on('error', (err: Error) => {
       if (process.env.MCP_DEBUG) {
         // Transport errors can contain the connection URL, including secrets.
-        console.error('[RobustClient] Connection error');
+        console.error('[RobustClient] Connection error:', safeConnectionError(err, this.token));
       }
       this.handleConnectionError(err);
     });
