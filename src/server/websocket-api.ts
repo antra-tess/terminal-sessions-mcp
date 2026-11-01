@@ -44,11 +44,11 @@ export class SessionAPI {
   private authToken?: string;
   private guard: RequestGuard;
 
-  constructor(port: number = 3100, host: string = 'localhost', authToken?: string, access: AccessOptions = accessFromEnv()) {
+  constructor(port: number = 3100, host: string = 'localhost', authToken?: string, access: AccessOptions = accessFromEnv(), headless: boolean = false) {
     this.authToken = authToken;
     // Host/Origin check at every request and upgrade (see request-guard.ts)
     this.guard = new RequestGuard(host, () => this.httpServer?.address()?.port ?? port, !!authToken, access, 'SessionAPI');
-    this.server = new PersistentSessionServer();
+    this.server = new PersistentSessionServer(headless);
     // Let takeScreenshot authenticate against the (token-protected) web GUI
     this.server.guiAuthToken = authToken;
     this.registerServerListener('session:created', (payload) => {

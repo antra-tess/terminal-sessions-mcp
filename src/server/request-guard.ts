@@ -194,19 +194,19 @@ export class RequestGuard {
         typeof hostHeader === 'string' &&
         u.host === hostHeader.trim().toLowerCase();
       if (!sameOrigin && !(u !== undefined && this.origins.has(u.origin))) {
-        return this.refuse(req, 403, CROSS_ORIGIN, `cross-origin (origin ${clip(origin)})`);
+        return this.refuse(req, 403, CROSS_ORIGIN, 'cross-origin');
       }
     }
 
     // 2. Host: must name this server unless a token gates the connection.
     if (!this.tokenRequired && (!host || !this.hostServed(host))) {
-      return this.refuse(req, 421, MISDIRECTED, `Host not served (host ${clip(hostHeader ?? '')})`);
+      return this.refuse(req, 421, MISDIRECTED, 'Host not served');
     }
     return { ok: true };
   }
 
   private refuse(req: IncomingMessage, status: 403 | 421, message: string, why: string): GuardResult {
-    console.error(`[${this.label}] refused ${req.method ?? ''} ${clip(req.url ?? '', 80)}: ${why} from ${req.socket?.remoteAddress ?? '?'}`);
+    console.error(`[${this.label}] refused ${req.method ?? ''} ${clip(requestUrl(req.url)?.pathname ?? '/', 80)}: ${why} from ${req.socket?.remoteAddress ?? '?'}`);
     return { ok: false, status, message };
   }
 }

@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- **Update every ws dependency to a patched 8.x release.** The direct range
+  and a transitive override cover GHSA-58qx-3vcg-4xpx and
+  GHSA-96hv-2xvq-fx4p without upgrading unrelated dependencies.
+- **Accept private token files in the backend and stdio shim.** Use
+  `SESSION_SERVER_TOKEN_FILE` or the backend's `--token-file`; unsafe or
+  empty files refuse startup without falling back to legacy token input.
+- **Keep authentication environment keys out of terminal sessions.** Clear
+  them after reading, before PTY spawn, in stored session metadata and in
+  `session.env`. This is not secure erasure or protection from same-UID processes.
+- **Omit query secrets from connection and refused-request logs.**
+- **Refuse terminal screenshots in headless mode before loading Puppeteer.**
+
 ## v1.7.3 - 2026-10-22
 
 ### Fixed

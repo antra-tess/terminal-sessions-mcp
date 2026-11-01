@@ -67,7 +67,8 @@ export class RobustSessionClient extends EventEmitter {
     
     this.ws.on('error', (err: Error) => {
       if (process.env.MCP_DEBUG) {
-        console.error('[RobustClient] Connection error:', err.message);
+        // Transport errors can contain the connection URL, including secrets.
+        console.error('[RobustClient] Connection error');
       }
       this.handleConnectionError(err);
     });

@@ -69,7 +69,7 @@ session-server --headless
 
 **Remote access (bind to all interfaces):**
 ```bash
-session-server --host 0.0.0.0 --token your-secret-token
+session-server --host 0.0.0.0 --token-file /path/to/private-token
 ```
 
 **Who may connect.** Both ports (the session API and the web GUI) refuse
@@ -457,6 +457,7 @@ npx ts-node examples/service-management.ts
 **Server:**
 - `SESSION_SERVER_PORT` - WebSocket session server port (default: 3100)
 - `SESSION_SERVER_HOST` - Host to bind to (default: localhost)
+- `SESSION_SERVER_TOKEN_FILE` - Path to a private token file (preferred; see [token-file usage](#private-token-files-and-security-limits))
 - `SESSION_SERVER_TOKEN` - Authentication token (optional, required for remote access by other names unless listed with `SESSION_SERVER_ALLOW_HOSTS`)
 - `SESSION_SERVER_ALLOW_HOSTS` - Comma-separated Host names (optionally `name:port`) a token-less server serves besides the loopback names (same as `--allow-host`)
 - `SESSION_SERVER_ALLOW_ORIGINS` - Comma-separated browser origins allowed besides the GUI's own page (same as `--allow-origin`)
@@ -466,8 +467,56 @@ npx ts-node examples/service-management.ts
 - `SESSION_SERVER_URL` - Full WebSocket URL (e.g., `ws://192.168.1.100:3100`)
 - `SESSION_SERVER_HOST` - Remote host (alternative to full URL)
 - `SESSION_SERVER_PORT` - Remote port (default: 3100)
+- `SESSION_SERVER_TOKEN_FILE` - Path to a private token file (preferred; see [token-file usage](#private-token-files-and-security-limits))
 - `SESSION_SERVER_TOKEN` - Authentication token (must match server)
 - `MCP_DEBUG` - Enable debug logging (set to "1")
+
+### Private token files and security limits
+
+Prefer a token file over passing the secret in arguments or environment values.
+Create the file using a trusted secret-management tool, owned by the account
+running the server, and restrict it with `chmod 600 /path/to/private-token`.
+Do not put the secret itself in a shell command or command history.
+
+```bash
+# Backend (only the path is in argv):
+session-server --headless --host 127.0.0.1 --token-file /path/to/private-token
+
+# Or set the file path for either backend or MCP stdio shim:
+SESSION_SERVER_TOKEN_FILE=/path/to/private-token terminal-sessions-mcp
+```
+
+The backend accepts both `--token-file <path>` and `--token-file=<path>`.
+File input takes precedence: the backend flag overrides
+`SESSION_SERVER_TOKEN_FILE`, and either file setting overrides legacy token
+input. A missing, unsafe, unreadable or empty configured file refuses startup;
+it never falls back to a legacy token. The file must be regular (not a symlink),
+owned by the running UID, with **no group or other permission bits**. One trailing
+newline (LF or CRLF) is removed; all other characters are preserved. Platforms
+without `process.getuid()` cannot validate ownership and refuse file input.
+
+The reader uses `O_NOFOLLOW` when available, validates `fstat` on the opened
+descriptor, and reads from that descriptor. Where `O_NOFOLLOW` is unavailable,
+it uses `lstat` symlink rejection plus descriptor identity checks instead;
+this portable fallback does not provide an atomic no-follow guarantee.
+
+Legacy `--token` and `SESSION_SERVER_TOKEN` still work, but expose the value
+through argv (and potentially shell history) or the process environment,
+respectively. Both backend and shim delete `SESSION_SERVER_TOKEN` and
+`SESSION_SERVER_TOKEN_FILE` from their environment after reading. Those fixed
+keys are also removed from PTY environments (including caller-provided
+overrides), stored session metadata and `session.env` results. Refused-request
+logs omit URL queries; the shim does not log connection URLs.
+
+These measures are **not secure erasure** and give **no protection against
+same-UID processes**: the token still exists in memory, and the file remains on
+disk. They do not prevent an authenticated user or shell startup script from
+reading the file or deliberately printing secrets. Keep tokens out of commands,
+other environment keys, session names, and URL paths. Authentication still
+travels in the WebSocket URL query; use a trusted connection (or TLS) and ensure
+proxies do not log queries. In `--headless` mode, `session.screenshot` is refused
+before Puppeteer is loaded; GUI-enabled screenshot behavior is otherwise
+unchanged.
 
 ### Remote Connections
 
@@ -475,7 +524,7 @@ You can connect to a session server running on a different machine:
 
 **On the remote machine:**
 ```bash
-session-server --host 0.0.0.0 --token mysecrettoken
+session-server --host 0.0.0.0 --token-file /path/to/private-token
 ```
 
 **In your MCP config (local machine):**
@@ -486,7 +535,7 @@ session-server --host 0.0.0.0 --token mysecrettoken
       "command": "terminal-sessions-mcp",
       "env": {
         "SESSION_SERVER_URL": "ws://192.168.1.100:3100",
-        "SESSION_SERVER_TOKEN": "mysecrettoken"
+        "SESSION_SERVER_TOKEN_FILE": "/path/to/private-token"
       }
     }
   }

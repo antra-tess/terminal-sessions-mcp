@@ -4,6 +4,7 @@
  * Start the Session Server API (and optionally the GUI)
  */
 
+import { readAuthToken } from './auth-token';
 import { SessionAPI } from './websocket-api';
 import { WebGUIServer } from '../../gui/src/server';
 import { ChildProcess, spawn } from 'child_process';
@@ -17,7 +18,7 @@ const headless = args.includes('--headless') || process.env.HEADLESS === 'true';
 function getArgValue(argName: string): string | undefined {
   const eqIndex = args.findIndex(a => a.startsWith(`--${argName}=`));
   if (eqIndex !== -1) {
-    return args[eqIndex].split('=')[1];
+    return args[eqIndex].slice(argName.length + 3);
   }
   const spaceIndex = args.indexOf(`--${argName}`);
   if (spaceIndex !== -1 && args[spaceIndex + 1] && !args[spaceIndex + 1].startsWith('--')) {
@@ -39,7 +40,13 @@ function getArgValues(argName: string): string[] {
 const host = getArgValue('host') || process.env.SESSION_SERVER_HOST || 'localhost';
 const port = parseInt(process.env.SESSION_SERVER_PORT || '3100');
 const guiPort = parseInt(process.env.GUI_PORT || '3200');
-const authToken = getArgValue('token') || process.env.SESSION_SERVER_TOKEN;
+const tokenFile = getArgValue('token-file');
+if (args.includes('--token-file') && tokenFile === undefined) {
+  delete process.env.SESSION_SERVER_TOKEN;
+  delete process.env.SESSION_SERVER_TOKEN_FILE;
+  throw new Error('--token-file requires a path');
+}
+const authToken = readAuthToken(getArgValue('token'), tokenFile);
 const envAccess = accessFromEnv();
 const access: AccessOptions = {
   allowHosts: [...(envAccess.allowHosts ?? []), ...getArgValues('allow-host')],
@@ -55,10 +62,10 @@ console.log(`
 ╚═══════════════════════════════════════╝
 
 Starting session server on ${host}:${port}...
-${authToken ? '🔐 Token authentication enabled' : '⚠️  No authentication (use --token for security)'}
+${authToken ? '🔐 Token authentication enabled' : '⚠️  No authentication (use --token-file for security)'}
 ${authToken ? '' : '   Without a token, only localhost Host names' + (access.allowHosts?.length ? ` and ${access.allowHosts.join(', ')}` : '') + ' are served.\n'}${access.allowOrigins?.length ? `   Browser pages allowed besides the GUI: ${access.allowOrigins.join(', ')}\n` : ''}`);
 
-const api = new SessionAPI(port, host, authToken, access);
+const api = new SessionAPI(port, host, authToken, access, headless);
 
 const displayHost = host === '0.0.0.0' ? '<hostname>' : host;
 console.log(`
