@@ -506,7 +506,9 @@ respectively. Both backend and shim delete `SESSION_SERVER_TOKEN` and
 `SESSION_SERVER_TOKEN_FILE` from their environment after reading. Those fixed
 keys are also removed from PTY environments (including caller-provided
 overrides), stored session metadata and `session.env` results. Refused-request
-logs omit URL queries; the shim does not log connection URLs.
+logs omit URL queries; the shim does not log connection URLs. Refusal logs also
+deliberately omit Host/Origin header values, since even malformed headers can
+carry secrets; this costs some diagnostic detail.
 
 These measures are **not secure erasure** and give **no protection against
 same-UID processes**: the token still exists in memory, and the file remains on
@@ -515,7 +517,8 @@ reading the file or deliberately printing secrets. Keep tokens out of commands,
 other environment keys, session names, and URL paths. Authentication still
 travels in the WebSocket URL query; use a trusted connection (or TLS) and ensure
 proxies do not log queries. In `--headless` mode, `session.screenshot` is refused
-before Puppeteer is loaded; GUI-enabled screenshot behavior is otherwise
+before Puppeteer is loaded. The direct WebSocket API entry point also honors
+`HEADLESS=true`; GUI-enabled screenshot behavior is otherwise
 unchanged.
 
 ### Remote Connections

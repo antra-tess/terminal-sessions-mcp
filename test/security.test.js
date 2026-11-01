@@ -263,3 +263,73 @@ test('GUI screenshot error retains diagnostics without disclosing its auth token
     assert.ok(!result.error.includes(TOKEN));
   } finally { Module._load = orig; await s.killAll(false); }
 });
+
+
+test('hostile Host and Origin values are omitted from refusal logs', () => {
+  const { RequestGuard } = require('../dist/src/server/request-guard');
+  const guard = new RequestGuard('127.0.0.1', 0, false);
+  const lines = [];
+  const original = console.error;
+  console.error = (...args) => lines.push(args.join(' '));
+  try {
+    for (const headers of [
+      { host: 'hostile.example/?token=' + TOKEN + '&query=' + FILE_SECRET },
+      { host: '127.0.0.1', origin: 'https://other.example/?token=' + TOKEN + '&query=' + FILE_SECRET }
+    ]) {
+      assert.equal(guard.check({
+        headers, method: 'GET', url: '/', socket: { remoteAddress: '127.0.0.1' }
+      }).ok, false);
+    }
+  } finally { console.error = original; }
+  assert.equal(lines.length, 2);
+  assert.ok(lines.every(line => line.includes('refused')));
+  assert.ok(!lines.join('\n').includes(TOKEN));
+  assert.ok(!lines.join('\n').includes(FILE_SECRET));
+  assert.ok(!lines.join('\n').includes('hostile.example'));
+  assert.ok(!lines.join('\n').includes('other.example'));
+});
+
+test('explicit private token file takes precedence over an argv token', t => {
+  const { readAuthToken } = require('../dist/src/server/auth-token');
+  const file = fixture(t);
+  const argvToken = 'test-argv-0123456789abcdef';
+  assert.equal(readAuthToken(argvToken, file), TOKEN);
+});
+
+test('invalid explicit token file refuses instead of falling back to an argv token', t => {
+  const { readAuthToken } = require('../dist/src/server/auth-token');
+  const file = fixture(t, TOKEN, 0o644);
+  const argvToken = 'test-argv-0123456789abcdef';
+  assert.throws(() => readAuthToken(argvToken, file), error =>
+    /token file/i.test(error.message) &&
+    !error.message.includes(TOKEN) && !error.message.includes(argvToken));
+});
+
+test('direct WebSocket API entry honors HEADLESS without opening a listener', async t => {
+  const file = fixture(t);
+  const probe = path.join(path.dirname(file), 'direct-entry-probe.cjs');
+  const serverModule = path.resolve('dist/src/server/session-server-v3.js');
+  fs.writeFileSync(probe, `
+    require('http').Server.prototype.listen = function() { return this; };
+    const sessions = require(${JSON.stringify(serverModule)});
+    const Original = sessions.PersistentSessionServer;
+    sessions.PersistentSessionServer = class extends Original {
+      constructor(...args) {
+        super(...args);
+        setImmediate(async () => {
+          const result = await this.takeScreenshot('absent');
+          console.log(JSON.stringify(result));
+          process.exit(0);
+        });
+      }
+    };
+  `);
+  const c = childProcess(t, path.resolve('dist/src/server/websocket-api.js'), {
+    HEADLESS: 'true', NODE_OPTIONS: '--require=' + probe
+  });
+  const [code] = await c.closed;
+  assert.equal(code, 0);
+  const result = JSON.parse(c.stdout());
+  assert.equal(result.success, false);
+  assert.match(result.error, /headless/i);
+});

@@ -13,8 +13,11 @@
 - **Keep authentication environment keys out of terminal sessions.** Clear
   them after reading, before PTY spawn, in stored session metadata and in
   `session.env`. This is not secure erasure or protection from same-UID processes.
-- **Omit query secrets from connection and refused-request logs.**
+- **Omit query secrets from connection and refused-request logs.** Refusal logs
+  deliberately omit Host/Origin values too, trading diagnostic detail for not
+  disclosing arbitrary secrets in malformed headers.
 - **Refuse terminal screenshots in headless mode before loading Puppeteer.**
+  The direct WebSocket API entry point also honors `HEADLESS=true`.
 
 ## v1.7.3 - 2026-10-22
 

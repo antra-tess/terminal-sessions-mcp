@@ -193,6 +193,8 @@ export class RequestGuard {
         (u.protocol === 'http:' || u.protocol === 'https:') &&
         typeof hostHeader === 'string' &&
         u.host === hostHeader.trim().toLowerCase();
+      // Omit Host/Origin values from refusals: malformed headers can contain
+      // arbitrary secrets, and truncating them would still disclose those secrets.
       if (!sameOrigin && !(u !== undefined && this.origins.has(u.origin))) {
         return this.refuse(req, 403, CROSS_ORIGIN, 'cross-origin');
       }

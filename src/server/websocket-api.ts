@@ -546,7 +546,7 @@ export class SessionClient extends EventEmitter {
 
 // Start server if run directly
 if (require.main === module) {
-  const api = new SessionAPI();
+  const api = new SessionAPI(undefined, undefined, undefined, undefined, process.env.HEADLESS === 'true');
   
   process.on('SIGINT', async () => {
     console.log('\nShutting down...');
