@@ -461,6 +461,7 @@ npx ts-node examples/service-management.ts
 - `SESSION_SERVER_ALLOW_HOSTS` - Comma-separated Host names (optionally `name:port`) a token-less server serves besides the loopback names (same as `--allow-host`)
 - `SESSION_SERVER_ALLOW_ORIGINS` - Comma-separated browser origins allowed besides the GUI's own page (same as `--allow-origin`)
 - `GUI_PORT` - Web GUI port (default: 3200)
+- `SESSION_SHELL` - Shell for new sessions; must be a POSIX shell (default: `/bin/bash`, or `wsl.exe` running Ubuntu's bash on Windows). On Windows, Git Bash (`C:\Program Files\Git\bin\bash.exe`) runs sessions without WSL. A shell whose file name is `wsl` or `wsl.exe` counts as WSL and always runs `-d Ubuntu bash`; any other launcher, such as System32's `bash.exe` or a distro's own executable, is treated as a Windows shell, so its sessions can't read their command files
 
 **MCP Client:**
 - `SESSION_SERVER_URL` - Full WebSocket URL (e.g., `ws://192.168.1.100:3100`)

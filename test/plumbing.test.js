@@ -7,7 +7,20 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { PersistentSessionServer } = require('../dist/src/server/session-server-v3.js');
+const {
+  PersistentSessionServer, defaultShell, isWslShell, shellPathFor, stripEraseChars,
+} = require('../dist/src/server/session-server-v3.js');
+
+/** Runs `fn` with process.platform reading `platform`, then puts it back. */
+const onPlatform = (platform, fn) => {
+  const real = Object.getOwnPropertyDescriptor(process, 'platform');
+  Object.defineProperty(process, 'platform', { ...real, value: platform });
+  try {
+    return fn();
+  } finally {
+    Object.defineProperty(process, 'platform', real);
+  }
+};
 
 const bareServer = () => Object.create(PersistentSessionServer.prototype);
 const bareSession = () => ({
@@ -62,6 +75,53 @@ test("a command's file is created exclusively: never through a link, never into 
   } finally {
     fs.rmSync(file, { force: true });
     fs.rmSync(target, { force: true });
+  }
+});
+
+test('the default shell is SESSION_SHELL, else bash, or WSL on Windows', () => {
+  assert.equal(defaultShell({}, 'linux'), '/bin/bash');
+  assert.equal(defaultShell({}, 'darwin'), '/bin/bash');
+  assert.equal(defaultShell({}, 'win32'), 'wsl.exe');
+  assert.equal(defaultShell({ SESSION_SHELL: 'C:\\Program Files\\Git\\bin\\bash.exe' }, 'win32'), 'C:\\Program Files\\Git\\bin\\bash.exe');
+  assert.equal(defaultShell({ SESSION_SHELL: '/bin/zsh' }, 'linux'), '/bin/zsh');
+  assert.equal(defaultShell({ SESSION_SHELL: '' }, 'linux'), '/bin/bash', 'an empty SESSION_SHELL is no setting');
+});
+
+test('only a shell named wsl or wsl.exe, on Windows, counts as WSL', () => {
+  for (const shell of ['wsl', 'wsl.exe', 'WSL.EXE', 'C:\\Windows\\System32\\wsl.exe', 'C:/Windows/System32/wsl.exe']) {
+    assert.equal(isWslShell(shell, 'win32'), true, shell);
+  }
+  for (const shell of ['bash.exe', 'C:\\Program Files\\Git\\bin\\bash.exe', 'C:\\Windows\\System32\\bash.exe', 'mywsl.exe', 'wsl.exe.bak']) {
+    assert.equal(isWslShell(shell, 'win32'), false, shell);
+  }
+  assert.equal(isWslShell('wsl.exe', 'linux'), false, 'nowhere but Windows');
+});
+
+test("a command's file is named as its shell reads it: as is off Windows, /mnt/<drive>/ under WSL, C:/ in a Windows shell", () => {
+  const file = 'C:\\Users\\Jo Doe\\AppData\\Local\\Temp\\tsm-cmd-1-n.sh';
+  assert.equal(shellPathFor('/tmp/tsm-cmd-1-n.sh', 'linux', false), '/tmp/tsm-cmd-1-n.sh');
+  assert.equal(shellPathFor(file, 'win32', true), '/mnt/c/Users/Jo Doe/AppData/Local/Temp/tsm-cmd-1-n.sh');
+  assert.equal(shellPathFor('D:\\t\\f.sh', 'win32', true), '/mnt/d/t/f.sh');
+  assert.equal(shellPathFor(file, 'win32', false), 'C:/Users/Jo Doe/AppData/Local/Temp/tsm-cmd-1-n.sh');
+});
+
+test("ConPTY's erase-character sequences are dropped, and nothing else", () => {
+  assert.equal(stripEraseChars('bar\x1b[17X\r\nx\x1b[X\r\n'), 'bar\r\nx\r\n');
+  const kept = 'a\x1b[17C b\x1b[2K c\x1b[31mred\x1b[0m X [17X';
+  assert.equal(stripEraseChars(kept), kept, 'other sequences, and an X or [17X with no ESC, stay');
+});
+
+test('a Windows server drops erase-character sequences from a result, and another keeps them', () => {
+  for (const [platform, output] of [['win32', 'bar\nx'], ['linux', 'bar\x1b[17X\nx\x1b[X']]) {
+    const server = bareServer();
+    server.notify = () => {};
+    const results = [];
+    const session = {
+      ...bareSession(), id: 's', commandQueue: [], outputBuffer: '<<<START:n>>>\nbar\x1b[17X\nx\x1b[X\n<<<EXIT:n:0>>>\n',
+      currentCommand: { nonce: 'n', started: true, resolve: (r) => results.push(r), startTime: Date.now() },
+    };
+    onPlatform(platform, () => server.resolveCommand(session, 0));
+    assert.equal(results[0].output, output, platform);
   }
 });
 
@@ -1930,11 +1990,36 @@ test("sendSignal sends a signal other than SIGINT to the shell itself, and write
     scan(server, session, '<<<NOFILE:n1>>>\r\n');
     assert.ok(session.inlinePieces.has('n1') && session.shellAtPrompt, 'a body the shell is partway through reading, as for the SIGINT tests');
     const before = written.length;
-    for (const signal of ['SIGTERM', 'SIGKILL', 'SIGHUP']) server.sendSignal('s', signal);
-    assert.deepEqual(killed, ['SIGTERM', 'SIGKILL', 'SIGHUP'], 'each goes to the shell');
+    onPlatform('linux', () => {
+      for (const signal of ['SIGTERM', 'SIGKILL', 'SIGHUP', 'SIGUSR1']) server.sendSignal('s', signal);
+    });
+    assert.deepEqual(killed, ['SIGTERM', 'SIGKILL', 'SIGHUP', 'SIGUSR1'], 'each goes to the shell');
     assert.deepEqual(written.slice(before), [], 'nothing is written');
   } finally {
     for (const file of session.pendingFiles.values()) fs.rmSync(file, { force: true });
     clearTimeout(session.currentTimeout);
   }
+});
+
+test("on Windows, sendSignal ends the shell for SIGTERM, SIGKILL and SIGHUP and refuses any other signal but SIGINT", () => {
+  const written = [];
+  const killed = [];
+  const { server, session } = inputServer(written);
+  // node-pty on Windows throws on any signal name, as its kill() does here.
+  session.shell.kill = (...args) => {
+    if (args.length > 0) throw new Error('Signals not supported on windows.');
+    killed.push('kill()');
+  };
+  const notified = [];
+  server.notify = (event) => notified.push(event);
+  onPlatform('win32', () => {
+    for (const signal of ['SIGTERM', 'SIGKILL', 'SIGHUP']) server.sendSignal('s', signal);
+    assert.deepEqual(killed, ['kill()', 'kill()', 'kill()'], 'each ends the shell, with no signal name');
+    for (const signal of ['SIGUSR1', 'SIGTSTP', 'SIGTERN']) {
+      assert.throws(() => server.sendSignal('s', signal), new RegExp(`^Error: Signal ${signal} can't be sent on Windows`));
+    }
+  });
+  assert.equal(killed.length, 3, 'a refused signal ends nothing');
+  assert.equal(notified.filter((e) => e === 'session:signal').length, 3, 'a refused signal is not reported as sent');
+  assert.deepEqual(written, [], 'nothing is written');
 });

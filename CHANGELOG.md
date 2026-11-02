@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- **`SESSION_SHELL` sets the shell new sessions run.** It has to be a POSIX
+  shell. On Windows this lets Git Bash (`C:\Program Files\Git\bin\bash.exe`),
+  MSYS2 or Cygwin run sessions without WSL. The default is unchanged:
+  `/bin/bash`, or WSL's bash on Windows. Only a shell named `wsl` or
+  `wsl.exe` counts as WSL; a command's temp file is named to it as
+  `/mnt/<drive>/...`, and to any other shell on Windows as `C:/...`.
+
+### Fixed
+
+- **Sessions can be killed on Windows, WSL included.** node-pty there throws
+  on any signal name, so `killSession` and `sendSignal` with SIGTERM, SIGKILL
+  or SIGHUP failed and left the shell running. Those now end the shell. As
+  Windows has no signals, a graceful kill there is a forced one, and any
+  other signal but SIGINT is refused with an error, leaving the session
+  running. SIGINT is still sent as Ctrl+C.
+- **Command results on Windows no longer hold ConPTY's erase-character
+  sequences.** ConPTY blanks the rest of a line with `ESC[<n>X`, so results
+  read like `bar\e[17X`. The sequences carry no text and are removed.
+
+### Changed
+
+- **node-pty is `^1.2.0-beta.18`, which ships prebuilt binaries for Windows,
+  Linux and macOS.** 1.0.0 built from source on Windows, which needs Visual
+  Studio Build Tools with the Spectre-mitigated libraries; without them
+  `npm install` failed with `MSB8040`. The postinstall step now also makes
+  the prebuilt `spawn-helper` executable on macOS.
+
 ## v1.7.3 - 2026-10-22
 
 ### Fixed
