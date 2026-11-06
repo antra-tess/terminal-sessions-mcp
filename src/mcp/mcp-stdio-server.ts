@@ -257,6 +257,10 @@ rl.on('line', async (line) => {
         });
         break;
         
+      case 'ping':
+        sendResponse(id, {});
+        break;
+
       case 'tools/list':
         sendResponse(id, {
           tools: Object.entries(TOOLS).map(([name, def]) => ({
