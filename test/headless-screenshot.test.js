@@ -15,6 +15,7 @@ const serverJs = join(__dirname, '..', 'dist', 'src', 'mcp', 'mcp-stdio-server.j
 const ALL_TOOLS = ['launch', 'runCommand', 'listSessions', 'tailLogs', 'sendInput', 'sendSignal', 'killSession', 'killAll', 'searchLogs', 'takeScreenshot'];
 
 // A session server that answers server.info as `info` says, counting the asks, and every other method with null.
+// answer() changes what it says from then on, and drop() ends every connection it holds.
 async function fakeSessionServer(info) {
   const wss = new WebSocket.Server({ host: '127.0.0.1', port: 0 });
   await once(wss, 'listening');
@@ -28,7 +29,14 @@ async function fakeSessionServer(info) {
     });
   });
   const url = `ws://127.0.0.1:${wss.address().port}`;
-  return { url, asks, close: () => new Promise((resolve) => wss.close(() => resolve())) };
+  return {
+    url,
+    asks,
+    answer: (next) => { info = next; },
+    drop: () => { for (const ws of wss.clients) ws.terminate(); },
+    nextConnection: () => once(wss, 'connection'),
+    close: () => new Promise((resolve) => wss.close(() => resolve())),
+  };
 }
 
 // A loopback port nothing listens on: one the kernel just handed out and that has been closed again.
@@ -132,6 +140,23 @@ test('lists made together share one server.info ask', async () => {
       const lists = await Promise.all(Array.from({ length: 5 }, () => listedTools(server)));
       for (const names of lists) assert.equal(names.includes('takeScreenshot'), false);
       assert.equal(fake.asks.serverInfo, 1);
+    });
+  } finally {
+    await fake.close();
+  }
+});
+
+test('a new connection asks server.info again, so a list after a reconnect says what the session server says now', async () => {
+  const fake = await fakeSessionServer({ gui: false });
+  try {
+    await withStdioServer(fake.url, async (server) => {
+      assert.equal((await listedTools(server)).includes('takeScreenshot'), false);
+      fake.answer({ gui: true });
+      const reconnected = fake.nextConnection();
+      fake.drop();
+      await reconnected;
+      assert.deepEqual(await listedTools(server), ALL_TOOLS);
+      assert.equal(fake.asks.serverInfo, 2);
     });
   } finally {
     await fake.close();
