@@ -14,9 +14,13 @@ import * as pty from 'node-pty';
 import { IPty } from 'node-pty';
 import { EventEmitter } from 'events';
 import * as fs from 'fs';
+import * as net from 'net';
 import * as os from 'os';
 import * as path from 'path';
 import { buildInputData } from './keys';
+
+const GUI_LOAD_TIMEOUT_MS = 10000;
+const screenshotGuiPort = (options?: { guiPort?: number }) => options?.guiPort || 3200;
 
 interface SessionInfo {
   id: string;
@@ -2079,6 +2083,27 @@ export class PersistentSessionServer extends EventEmitter {
   }
 
   /**
+   * Whether something accepts a connection at the address takeScreenshot loads the GUI from.
+   * The browser reaches http://localhost on whichever loopback address answers, while Node's
+   * connect to 'localhost' tries both only with autoSelectFamily, so both are tried here.
+   */
+  async guiAnswers(options?: { guiPort?: number }): Promise<boolean> {
+    const port = screenshotGuiPort(options);
+    const accepts = (host: string) => new Promise<boolean>((resolve) => {
+      const socket = net.connect({ host, port });
+      const settle = (answered: boolean) => {
+        socket.destroy();
+        resolve(answered);
+      };
+      socket.setTimeout(GUI_LOAD_TIMEOUT_MS, () => settle(false));
+      socket.once('connect', () => settle(true));
+      socket.on('error', () => settle(false));
+    });
+    const answers = await Promise.all(['127.0.0.1', '::1'].map(accepts));
+    return answers.includes(true);
+  }
+
+  /**
    * Take a screenshot of the terminal session via xterm.js GUI
    * This properly captures TUIs like htop, vim, etc.
    */
@@ -2095,7 +2120,13 @@ export class PersistentSessionServer extends EventEmitter {
         throw new Error(`Session ${sessionId} not found`);
       }
 
-      const guiPort = options?.guiPort || 3200;
+      const guiPort = screenshotGuiPort(options);
+      if (!(await this.guiAnswers(options))) {
+        return {
+          success: false,
+          error: `No GUI answers at localhost:${guiPort}, and screenshots are taken through it. A session server started with --headless serves none.`,
+        };
+      }
       const width = options?.width || 1400;
       const height = options?.height || 900;
 
@@ -2118,7 +2149,7 @@ export class PersistentSessionServer extends EventEmitter {
         // Navigate to the GUI (with auth token if the GUI requires one)
         const tokenParam = this.guiAuthToken ? `?token=${encodeURIComponent(this.guiAuthToken)}` : '';
         const guiUrl = `http://localhost:${guiPort}${tokenParam}`;
-        await page.goto(guiUrl, { waitUntil: 'networkidle0', timeout: 10000 });
+        await page.goto(guiUrl, { waitUntil: 'networkidle0', timeout: GUI_LOAD_TIMEOUT_MS });
         
         // Wait for the session list to load
         await page.waitForSelector('.session-item', { timeout: 5000 });

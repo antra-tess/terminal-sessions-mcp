@@ -229,6 +229,10 @@ export class SessionAPI {
         case 'session.screenshot':
           result = await this.server.takeScreenshot(params.sessionId, params);
           break;
+
+        case 'server.info':
+          result = { gui: await this.server.guiAnswers(params) };
+          break;
           
         case 'session.resize':
           this.server.resizeSession(params.sessionId, params.cols, params.rows);

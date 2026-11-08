@@ -119,13 +119,11 @@ const signalsReachNode = process.platform !== 'win32';
 // after one, with stdin closed and answers queued that the client hasn't read,
 // where the close is still waiting for them to leave.
 const states = {
-  'before any tool call': async (server) => {
-    const list = await server.request('tools/list');
-    assert.ok(list.result.tools.length > 0);
-  },
+  'before any tool call': async () => {},
   'after a tool call, with stdin closed and answers unread': async (server) => {
     const call = await server.request('tools/call', { name: 'listSessions', arguments: {} });
     assert.equal(call.error, undefined, 'listSessions against the fake session server succeeds');
+    assert.ok((await server.request('tools/list')).result.tools.length > 0);
     fillUnread(server);
     server.child.stdin.end();
     await new Promise((resolve) => setTimeout(resolve, 200));
@@ -196,6 +194,7 @@ test('on a closed stdin the server lets out the answers it has written to a clie
   const server = startStdioServer(fake.url);
   try {
     await initialize(server);
+    assert.ok((await server.request('tools/list')).result.tools.length > 0);
     server.child.stdout.pause();
     const answers = Array.from({ length: 40 }, () => server.request('tools/list'));
     const call = server.request('tools/call', { name: 'listSessions', arguments: {} });

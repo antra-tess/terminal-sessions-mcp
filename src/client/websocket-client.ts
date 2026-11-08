@@ -24,6 +24,7 @@ export class RobustSessionClient extends EventEmitter {
   private reconnectDelay = 1000; // Start with 1 second
   private maxReconnectDelay = 5000; // Cap at 5 seconds
   private requestTimeout = 10000; // 10 second timeout for requests
+  private serverInfoAsk: Promise<{ gui: boolean } | null> | null = null;
   
   constructor(url: string = 'ws://localhost:3100', token?: string) {
     super();
@@ -123,6 +124,8 @@ export class RobustSessionClient extends EventEmitter {
       pending.reject(new Error('Connection lost'));
     }
     this.pending.clear();
+    this.serverInfoAsk = null;
+    this.emit('disconnected');
     
     // Clean up WebSocket
     if (this.ws) {
@@ -251,6 +254,48 @@ export class RobustSessionClient extends EventEmitter {
     });
   }
   
+  /**
+   * The session server's server.info answer for this connection, asked once and shared: null when
+   * the client is reconnecting, the server doesn't answer it, or no answer comes within requestTimeout.
+   */
+  serverInfo(): Promise<{ gui: boolean } | null> {
+    if (this.state === ConnectionState.RECONNECTING || this.state === ConnectionState.DISCONNECTED) {
+      return Promise.resolve(null);
+    }
+    if (!this.serverInfoAsk) this.serverInfoAsk = this.askServerInfo();
+    return this.serverInfoAsk;
+  }
+
+  private askServerInfo(): Promise<{ gui: boolean } | null> {
+    return new Promise((resolve) => {
+      const id = Math.random().toString(36).substr(2, 9);
+      const finish = (info: { gui: boolean } | null) => {
+        clearTimeout(timeout);
+        this.removeListener('connected', send);
+        this.removeListener('disconnected', lost);
+        this.pending.delete(id);
+        resolve(info);
+      };
+      const timeout = setTimeout(() => finish(null), this.requestTimeout);
+      const lost = () => finish(null);
+      const send = () => {
+        this.pending.set(id, {
+          resolve: (result: any) => finish(typeof result?.gui === 'boolean' ? { gui: result.gui } : null),
+          reject: () => finish(null),
+          timeout,
+        });
+        try {
+          this.ws.send(JSON.stringify({ id, method: 'server.info' }));
+        } catch {
+          finish(null);
+        }
+      };
+      this.once('disconnected', lost);
+      if (this.state === ConnectionState.CONNECTED) send();
+      else this.once('connected', send);
+    });
+  }
+
   // API methods
   async createSession(params: any) {
     return this.request('session.create', params);
@@ -335,6 +380,8 @@ export class RobustSessionClient extends EventEmitter {
       pending.reject(new Error('Client closed'));
     }
     this.pending.clear();
+    this.serverInfoAsk = null;
+    this.emit('disconnected');
     
     this.state = ConnectionState.DISCONNECTED;
   }

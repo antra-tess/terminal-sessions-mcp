@@ -257,15 +257,19 @@ rl.on('line', async (line) => {
         });
         break;
         
-      case 'tools/list':
+      case 'tools/list': {
+        const screenshots = await getMCP().screenshotsAvailable();
         sendResponse(id, {
-          tools: Object.entries(TOOLS).map(([name, def]) => ({
-            name,
-            description: def.description,
-            inputSchema: def.parameters
-          }))
+          tools: Object.entries(TOOLS)
+            .filter(([name]) => screenshots || name !== 'takeScreenshot')
+            .map(([name, def]) => ({
+              name,
+              description: def.description,
+              inputSchema: def.parameters
+            }))
         });
         break;
+      }
         
       case 'tools/call':
         try {

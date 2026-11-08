@@ -438,6 +438,12 @@ export class ConnectomeTestingMCP {
     }
   }
   
+  /** Whether takeScreenshot can work: false only when the session server says no GUI answers. */
+  async screenshotsAvailable(): Promise<boolean> {
+    const info = await this.getClient().serverInfo();
+    return info?.gui !== false;
+  }
+
   /**
    * Take a screenshot of the terminal session
    * @tool
