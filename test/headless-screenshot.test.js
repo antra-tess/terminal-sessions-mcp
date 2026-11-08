@@ -30,7 +30,8 @@ async function fakeSessionServer(info) {
       const { id, method } = JSON.parse(data.toString());
       if (method !== 'server.info') return ws.send(JSON.stringify({ id, result: null }));
       asks.serverInfo++;
-      ws.send(JSON.stringify(info === 'unknown' ? { id, error: 'Unknown method: server.info' } : { id, result: info }));
+      if (info === 'unknown') return ws.send(JSON.stringify({ id, error: 'Unknown method: server.info' }));
+      ws.send(JSON.stringify(info.error ? { id, error: info.error } : { id, result: info }));
     });
   });
   const url = `ws://127.0.0.1:${wss.address().port}`;
@@ -155,6 +156,19 @@ test('tools/list offers all ten when the session server does not know server.inf
   try {
     await withStdioServer(fake.url, async (server) => {
       assert.deepEqual(await listedTools(server), ALL_TOOLS);
+    });
+  } finally {
+    await fake.close();
+  }
+});
+
+test('any other error from server.info leaves takeScreenshot out, and the next list asks again', async () => {
+  const fake = await fakeSessionServer({ error: 'boom' });
+  try {
+    await withStdioServer(fake.url, async (server) => {
+      assert.deepEqual(await listedTools(server), WITHOUT_SCREENSHOT);
+      assert.deepEqual(await listedTools(server), WITHOUT_SCREENSHOT);
+      assert.equal(fake.asks.serverInfo, 2);
     });
   } finally {
     await fake.close();
