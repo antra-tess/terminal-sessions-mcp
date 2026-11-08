@@ -2122,7 +2122,9 @@ export class PersistentSessionServer extends EventEmitter {
    * a screenshot taken then is refused in plain words.
    */
   async guiSeen(options?: { guiPort?: number }): Promise<boolean> {
-    return this.guiSeenPorts.has(screenshotGuiPort(options)) || this.guiAnswers(options);
+    const port = screenshotGuiPort(options);
+    if (!this.guiSeenPorts.has(port)) await this.guiAnswers(options);
+    return this.guiSeenPorts.has(port);
   }
 
   /**

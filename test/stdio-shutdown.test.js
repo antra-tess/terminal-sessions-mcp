@@ -17,8 +17,8 @@ const ANSWER_WITHIN_MS = 10000;
 
 // A session server that answers session.list with no sessions, and server.info
 // as one whose GUI has answered, after `delayMs` when given. The stdio server's
-// first tool call opens a WebSocket to it; that socket is what keeps the
-// process alive once stdin is gone.
+// first tools/list or tool call opens a WebSocket to it; that socket is what
+// keeps the process alive once stdin is gone.
 async function fakeSessionServer({ delayMs = 0 } = {}) {
   const wss = new WebSocket.Server({ host: '127.0.0.1', port: 0 });
   await once(wss, 'listening');

@@ -215,11 +215,13 @@ test('once a GUI has answered, takeScreenshot is added with one list_changed and
       await changed;
       assert.deepEqual(await listedTools(server), ALL_TOOLS);
 
-      // A session server that restarts with no GUI doesn't take it away again.
+      // A session server that restarts with no GUI doesn't take it away again. A tool call waits for the client's
+      // reconnection, so whatever the client does on connecting has happened before the last list.
       fake.answer({ guiSeen: false });
       reconnected = fake.nextConnection();
       fake.drop();
       await reconnected;
+      await server.request('tools/call', { name: 'listSessions', arguments: {} });
       assert.deepEqual(await listedTools(server), ALL_TOOLS);
       assert.deepEqual(server.notifications, [LIST_CHANGED]);
     });
@@ -228,24 +230,33 @@ test('once a GUI has answered, takeScreenshot is added with one list_changed and
   }
 });
 
-test('a GUI answers when something accepts at its port on 127.0.0.1 or ::1, and not when nothing does', async () => {
+test('a GUI answers when something accepts at its port on 127.0.0.1, and not when nothing does', async () => {
   const server = new PersistentSessionServer();
   assert.equal(await server.guiAnswers({ guiPort: await closedPort() }), false);
-  for (const host of ['127.0.0.1', '::1']) {
-    const gui = net.createServer();
-    try {
-      gui.listen(0, host);
-      await once(gui, 'listening');
-    } catch (error) {
-      // A host with no IPv6 loopback has nothing to show here; any other failure to listen is the test's own.
-      if (host === '::1' && ['EADDRNOTAVAIL', 'EAFNOSUPPORT'].includes(error.code)) continue;
-      throw error;
-    }
-    try {
-      assert.equal(await server.guiAnswers({ guiPort: gui.address().port }), true, `a listener on ${host}`);
-    } finally {
-      await new Promise((resolve) => gui.close(resolve));
-    }
+  const gui = net.createServer();
+  gui.listen(0, '127.0.0.1');
+  await once(gui, 'listening');
+  try {
+    assert.equal(await server.guiAnswers({ guiPort: gui.address().port }), true);
+  } finally {
+    await new Promise((resolve) => gui.close(resolve));
+  }
+});
+
+test('a GUI answers when something accepts at its port on ::1', async (t) => {
+  const server = new PersistentSessionServer();
+  const gui = net.createServer();
+  try {
+    gui.listen(0, '::1');
+    await once(gui, 'listening');
+  } catch (error) {
+    if (['EADDRNOTAVAIL', 'EAFNOSUPPORT'].includes(error.code)) return t.skip('this host has no IPv6 loopback');
+    throw error;
+  }
+  try {
+    assert.equal(await server.guiAnswers({ guiPort: gui.address().port }), true);
+  } finally {
+    await new Promise((resolve) => gui.close(resolve));
   }
 });
 

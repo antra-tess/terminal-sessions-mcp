@@ -24,6 +24,7 @@ export class RobustSessionClient extends EventEmitter {
   private reconnectDelay = 1000; // Start with 1 second
   private maxReconnectDelay = 5000; // Cap at 5 seconds
   private requestTimeout = 10000; // 10 second timeout for requests
+  private connectionLost = new Set<() => void>();
   
   constructor(url: string = 'ws://localhost:3100', token?: string) {
     super();
@@ -123,7 +124,6 @@ export class RobustSessionClient extends EventEmitter {
       pending.reject(new Error('Connection lost'));
     }
     this.pending.clear();
-    this.emit('disconnected');
     
     // Clean up WebSocket
     if (this.ws) {
@@ -134,6 +134,7 @@ export class RobustSessionClient extends EventEmitter {
     
     // Schedule reconnection
     this.scheduleReconnect();
+    for (const lost of [...this.connectionLost]) lost();
   }
   
   private handleDisconnection(): void {
@@ -266,7 +267,7 @@ export class RobustSessionClient extends EventEmitter {
       const finish = (info: { guiSeen: boolean } | 'unsupported' | null) => {
         clearTimeout(timeout);
         this.removeListener('connected', send);
-        this.removeListener('disconnected', lost);
+        this.connectionLost.delete(lost);
         this.pending.delete(id);
         resolve(info);
       };
@@ -284,7 +285,7 @@ export class RobustSessionClient extends EventEmitter {
           finish(null);
         }
       };
-      this.once('disconnected', lost);
+      this.connectionLost.add(lost);
       if (this.state === ConnectionState.CONNECTED) send();
       else this.once('connected', send);
     });
@@ -374,9 +375,9 @@ export class RobustSessionClient extends EventEmitter {
       pending.reject(new Error('Client closed'));
     }
     this.pending.clear();
-    this.emit('disconnected');
     
     this.state = ConnectionState.DISCONNECTED;
+    for (const lost of [...this.connectionLost]) lost();
   }
 }
 
