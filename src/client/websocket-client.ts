@@ -24,7 +24,6 @@ export class RobustSessionClient extends EventEmitter {
   private reconnectDelay = 1000; // Start with 1 second
   private maxReconnectDelay = 5000; // Cap at 5 seconds
   private requestTimeout = 10000; // 10 second timeout for requests
-  private serverInfoAsk: Promise<{ gui: boolean } | null> | null = null;
   
   constructor(url: string = 'ws://localhost:3100', token?: string) {
     super();
@@ -124,7 +123,6 @@ export class RobustSessionClient extends EventEmitter {
       pending.reject(new Error('Connection lost'));
     }
     this.pending.clear();
-    this.serverInfoAsk = null;
     this.emit('disconnected');
     
     // Clean up WebSocket
@@ -255,21 +253,17 @@ export class RobustSessionClient extends EventEmitter {
   }
   
   /**
-   * The session server's server.info answer for this connection, asked once and shared: null when
-   * the client is reconnecting, the server doesn't answer it, or no answer comes within requestTimeout.
+   * What the session server says through server.info, asked now: its answer; 'unsupported' when it doesn't know
+   * server.info, as session servers before it don't; or null when no answer comes: at once while the client is
+   * reconnecting or closed, and on an error reply, a malformed answer, a lost connection or requestTimeout.
    */
-  serverInfo(): Promise<{ gui: boolean } | null> {
+  serverInfo(): Promise<{ guiSeen: boolean } | 'unsupported' | null> {
     if (this.state === ConnectionState.RECONNECTING || this.state === ConnectionState.DISCONNECTED) {
       return Promise.resolve(null);
     }
-    if (!this.serverInfoAsk) this.serverInfoAsk = this.askServerInfo();
-    return this.serverInfoAsk;
-  }
-
-  private askServerInfo(): Promise<{ gui: boolean } | null> {
     return new Promise((resolve) => {
       const id = Math.random().toString(36).substr(2, 9);
-      const finish = (info: { gui: boolean } | null) => {
+      const finish = (info: { guiSeen: boolean } | 'unsupported' | null) => {
         clearTimeout(timeout);
         this.removeListener('connected', send);
         this.removeListener('disconnected', lost);
@@ -280,8 +274,8 @@ export class RobustSessionClient extends EventEmitter {
       const lost = () => finish(null);
       const send = () => {
         this.pending.set(id, {
-          resolve: (result: any) => finish(typeof result?.gui === 'boolean' ? { gui: result.gui } : null),
-          reject: () => finish(null),
+          resolve: (result: any) => finish(typeof result?.guiSeen === 'boolean' ? { guiSeen: result.guiSeen } : null),
+          reject: (error: Error) => finish(error.message === 'Unknown method: server.info' ? 'unsupported' : null),
           timeout,
         });
         try {
@@ -380,7 +374,6 @@ export class RobustSessionClient extends EventEmitter {
       pending.reject(new Error('Client closed'));
     }
     this.pending.clear();
-    this.serverInfoAsk = null;
     this.emit('disconnected');
     
     this.state = ConnectionState.DISCONNECTED;

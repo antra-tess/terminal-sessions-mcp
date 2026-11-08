@@ -15,16 +15,17 @@ const serverJs = join(__dirname, '..', 'dist', 'src', 'mcp', 'mcp-stdio-server.j
 const EXIT_WITHIN_MS = 2000;
 const ANSWER_WITHIN_MS = 10000;
 
-// A session server that answers session.list with no sessions, after
-// `delayMs` when given. The stdio server's first tool call opens a WebSocket
-// to it; that socket is what keeps the process alive once stdin is gone.
+// A session server that answers session.list with no sessions, and server.info
+// as one whose GUI has answered, after `delayMs` when given. The stdio server's
+// first tool call opens a WebSocket to it; that socket is what keeps the
+// process alive once stdin is gone.
 async function fakeSessionServer({ delayMs = 0 } = {}) {
   const wss = new WebSocket.Server({ host: '127.0.0.1', port: 0 });
   await once(wss, 'listening');
   wss.on('connection', (ws) => {
     ws.on('message', (data) => {
       const { id, method } = JSON.parse(data.toString());
-      const result = method === 'session.list' ? [] : null;
+      const result = method === 'session.list' ? [] : method === 'server.info' ? { guiSeen: true } : null;
       setTimeout(() => ws.send(JSON.stringify({ id, result })), delayMs);
     });
   });

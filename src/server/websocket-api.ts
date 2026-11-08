@@ -231,7 +231,7 @@ export class SessionAPI {
           break;
 
         case 'server.info':
-          result = { gui: await this.server.guiAnswers(params) };
+          result = { guiSeen: await this.server.guiSeen(params) };
           break;
           
         case 'session.resize':

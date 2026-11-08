@@ -413,6 +413,8 @@ export class PersistentSessionServer extends EventEmitter {
    */
   guiAuthToken?: string;
 
+  private guiSeenPorts = new Set<number>();
+
   constructor() {
     super();
     // When the program exits, remove the sessions' temp files. An 'exit'
@@ -2083,24 +2085,44 @@ export class PersistentSessionServer extends EventEmitter {
   }
 
   /**
-   * Whether something accepts a connection at the address takeScreenshot loads the GUI from.
-   * The browser reaches http://localhost on whichever loopback address answers, while Node's
-   * connect to 'localhost' tries both only with autoSelectFamily, so both are tried here.
+   * Whether something accepts a connection now at the address takeScreenshot loads the GUI from: true at the first
+   * loopback address that accepts. The browser reaches http://localhost on whichever loopback address answers, while
+   * Node's connect to 'localhost' tries both only with autoSelectFamily, so both are tried here.
    */
   async guiAnswers(options?: { guiPort?: number }): Promise<boolean> {
     const port = screenshotGuiPort(options);
-    const accepts = (host: string) => new Promise<boolean>((resolve) => {
-      const socket = net.connect({ host, port });
-      const settle = (answered: boolean) => {
-        socket.destroy();
-        resolve(answered);
-      };
-      socket.setTimeout(GUI_LOAD_TIMEOUT_MS, () => settle(false));
-      socket.once('connect', () => settle(true));
-      socket.on('error', () => settle(false));
+    const answered = await new Promise<boolean>((resolve) => {
+      const sockets = ['127.0.0.1', '::1'].map((host) => net.connect({ host, port }));
+      let unanswered = sockets.length;
+      for (const socket of sockets) {
+        let settled = false;
+        const settle = (accepted: boolean) => {
+          if (settled) return;
+          settled = true;
+          socket.destroy();
+          if (accepted) {
+            for (const other of sockets) other.destroy();
+            resolve(true);
+          } else if (--unanswered === 0) {
+            resolve(false);
+          }
+        };
+        socket.setTimeout(GUI_LOAD_TIMEOUT_MS, () => settle(false));
+        socket.once('connect', () => settle(true));
+        socket.on('error', () => settle(false));
+      }
     });
-    const answers = await Promise.all(['127.0.0.1', '::1'].map(accepts));
-    return answers.includes(true);
+    if (answered) this.guiSeenPorts.add(port);
+    return answered;
+  }
+
+  /**
+   * Whether a GUI has answered at the port takeScreenshot uses (options.guiPort, or 3200) since this server started.
+   * Once one has, the port stays seen, so hosts keep offering takeScreenshot while that GUI restarts or is gone, and
+   * a screenshot taken then is refused in plain words.
+   */
+  async guiSeen(options?: { guiPort?: number }): Promise<boolean> {
+    return this.guiSeenPorts.has(screenshotGuiPort(options)) || this.guiAnswers(options);
   }
 
   /**
@@ -2124,7 +2146,7 @@ export class PersistentSessionServer extends EventEmitter {
       if (!(await this.guiAnswers(options))) {
         return {
           success: false,
-          error: `No GUI answers at localhost:${guiPort}, and screenshots are taken through it. A session server started with --headless serves none.`,
+          error: `No GUI answers at localhost:${guiPort}, and screenshots are taken through it, so none can be taken now. Calling again won't help until one does; whoever runs the session server can start its web GUI.`,
         };
       }
       const width = options?.width || 1400;

@@ -60,13 +60,13 @@ function getMCP() {
     
     if (url) {
       console.error(`[MCP] Using URL: ${url}`);
-      mcp = new ConnectomeTestingMCP(url, token);
+      mcp = new ConnectomeTestingMCP(url, token, { onScreenshotsOffered: screenshotsAdded });
     } else {
       const host = process.env.SESSION_SERVER_HOST || 'localhost';
       const port = process.env.SESSION_SERVER_PORT || '3100';
       const fallbackUrl = `ws://${host}:${port}`;
       console.error(`[MCP] Using fallback URL: ${fallbackUrl}`);
-      mcp = new ConnectomeTestingMCP(fallbackUrl, token);
+      mcp = new ConnectomeTestingMCP(fallbackUrl, token, { onScreenshotsOffered: screenshotsAdded });
     }
   }
   return mcp;
@@ -203,6 +203,13 @@ const TOOLS = {
 // handler at the end of this file).
 let closing = false;
 
+let listedWithoutScreenshot = false;
+
+function screenshotsAdded() {
+  if (!listedWithoutScreenshot || closing) return;
+  console.log(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/tools/list_changed' }));
+}
+
 // Send response
 function sendResponse(id: string | number, result?: any, error?: any) {
   if (closing) return;
@@ -248,7 +255,7 @@ rl.on('line', async (line) => {
         sendResponse(id, {
           protocolVersion: negotiateProtocolVersion(params?.protocolVersion),
           capabilities: {
-            tools: {}
+            tools: { listChanged: true }
           },
           serverInfo: {
             name: 'terminal-sessions-mcp',
@@ -258,7 +265,8 @@ rl.on('line', async (line) => {
         break;
         
       case 'tools/list': {
-        const screenshots = await getMCP().screenshotsAvailable();
+        const screenshots = await getMCP().screenshotsOffered();
+        if (!screenshots) listedWithoutScreenshot = true;
         sendResponse(id, {
           tools: Object.entries(TOOLS)
             .filter(([name]) => screenshots || name !== 'takeScreenshot')

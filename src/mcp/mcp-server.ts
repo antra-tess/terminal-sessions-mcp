@@ -38,15 +38,25 @@ export class ConnectomeTestingMCP {
   private apiUrl: string;
   private authToken?: string;
   private serviceMap = new Map<string, string>(); // name -> sessionId
+  private onScreenshotsOffered?: () => void;
+  private screenshotsSeen = false;
+  private screenshotsAsk: Promise<boolean> | null = null;
   
-  constructor(apiUrl: string = 'ws://localhost:3100', authToken?: string) {
+  /**
+   * @param options.onScreenshotsOffered called once, when screenshotsOffered() first answers true.
+   */
+  constructor(apiUrl: string = 'ws://localhost:3100', authToken?: string, options?: { onScreenshotsOffered?: () => void }) {
     this.apiUrl = apiUrl;
     this.authToken = authToken;
+    this.onScreenshotsOffered = options?.onScreenshotsOffered;
   }
   
   private getClient(): RobustSessionClient {
     if (!this.client) {
       this.client = new RobustSessionClient(this.apiUrl, this.authToken);
+      this.client.on('connected', () => {
+        if (!this.screenshotsSeen) void this.screenshotsOffered();
+      });
     }
     return this.client;
   }
@@ -438,10 +448,24 @@ export class ConnectomeTestingMCP {
     }
   }
   
-  /** Whether takeScreenshot can work: false only when the session server says no GUI answers. */
-  async screenshotsAvailable(): Promise<boolean> {
-    const info = await this.getClient().serverInfo();
-    return info?.gui !== false;
+  /**
+   * Whether takeScreenshot is offered: from the first time the session server says a GUI has answered, or doesn't
+   * know server.info as session servers before it don't, for the rest of this process. Until then each call asks it,
+   * calls made together sharing one ask, and so does each connection the client opens.
+   */
+  screenshotsOffered(): Promise<boolean> {
+    if (this.screenshotsSeen) return Promise.resolve(true);
+    if (!this.screenshotsAsk) {
+      this.screenshotsAsk = this.getClient().serverInfo().then((info) => {
+        this.screenshotsAsk = null;
+        if (!this.screenshotsSeen && (info === 'unsupported' || info?.guiSeen === true)) {
+          this.screenshotsSeen = true;
+          this.onScreenshotsOffered?.();
+        }
+        return this.screenshotsSeen;
+      });
+    }
+    return this.screenshotsAsk;
   }
 
   /**
