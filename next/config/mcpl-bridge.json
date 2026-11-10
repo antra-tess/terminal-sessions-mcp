@@ -1,0 +1,15 @@
+{
+  "servers": {
+    "terminal": {
+      "transport": { "command": "tsm-relay", "args": ["--scope", "claude"] },
+      "grant": ["tools", "pushEvents"],
+      "enableFeatureSets": ["terminal.tools", "terminal.events"],
+      "toolPrefix": "terminal",
+      "wake": {
+        "wake": [["terminal:ended"], ["terminal:waiting"], ["terminal:exited"], ["terminal:match"]]
+      },
+      "reconnect": true,
+      "reconnectIntervalMs": 1000
+    }
+  }
+}

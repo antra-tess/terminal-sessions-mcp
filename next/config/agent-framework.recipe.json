@@ -1,0 +1,13 @@
+{
+  "mcplServers": [
+    {
+      "id": "terminal",
+      "transport": "stdio",
+      "command": "tsm-relay",
+      "args": ["--scope", "AGENT"],
+      "toolPrefix": "terminal",
+      "reconnect": true,
+      "enabledFeatureSets": ["terminal.tools", "terminal.events"]
+    }
+  ]
+}

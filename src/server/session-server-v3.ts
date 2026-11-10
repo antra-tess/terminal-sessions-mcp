@@ -16,6 +16,7 @@ import { EventEmitter } from 'events';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { execFile } from 'child_process';
 import { buildInputData } from './keys';
 
 interface SessionInfo {
@@ -396,6 +397,125 @@ const HELD_PROBE_MAX_MS = 2000;
  */
 const INTERRUPTED_BODY = '[command not run: interrupted before its body was all typed in]';
 
+interface Listed {
+  pid: number;
+  pgid: number;
+}
+
+const LINUX = process.platform === 'linux';
+/** How long a kill may take: RobustSessionClient's default request timeout, through which a kill reaches killSession. The WebSocket API's session.kill calls killSession directly, under no such bound. */
+const KILL_BUDGET_MS = 10_000;
+const SHELL_WAIT_MS = 3000;
+const SETTLE_MS = 50;
+
+/**
+ * On macOS, node-pty starts every shell through the spawn-helper beside the native module it loaded, which `require`
+ * keeps in its cache. Some of node-pty's releases ship that helper without its execute bit.
+ */
+export function unrunnableHelper(ptyDir?: string, platform: string = process.platform): string | undefined {
+  if (platform !== 'darwin') return undefined;
+  let dir = ptyDir;
+  if (dir === undefined) {
+    try {
+      dir = path.dirname(require.resolve('node-pty/package.json'));
+    } catch {
+      return undefined;
+    }
+  }
+  const addon = Object.keys(require.cache).find((f) => f.startsWith(dir + path.sep) && path.basename(f) === 'pty.node');
+  if (addon === undefined) return undefined;
+  const helper = path.join(path.dirname(addon), 'spawn-helper');
+  try {
+    fs.accessSync(helper, fs.constants.X_OK);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'EACCES' && fs.existsSync(helper)) return helper;
+  }
+  return undefined;
+}
+
+function ps(args: string[], until: number): Promise<{ status: number; stdout: string } | undefined> {
+  const timeout = Math.floor(until - performance.now());
+  if (timeout <= 0) return Promise.resolve(undefined);
+  return new Promise((resolve) => {
+    // After its timeout, execFile's callback waits for the child to exit, which SIGKILL can't hasten for a process in uninterruptible sleep.
+    const timer = setTimeout(() => resolve(undefined), timeout);
+    execFile('ps', args, { encoding: 'utf8', timeout, killSignal: 'SIGKILL' }, (error, stdout) => {
+      clearTimeout(timer);
+      if (!error) resolve({ status: 0, stdout });
+      else resolve(typeof error.code === 'number' && !error.killed ? { status: error.code, stdout } : undefined);
+    });
+  });
+}
+
+function linuxStat(pid: number): { pgid: number; tty: number } | undefined {
+  try {
+    const s = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const f = s.slice(s.lastIndexOf(')') + 2).split(' ');
+    return { pgid: Number(f[2]), tty: Number(f[4]) };
+  } catch {
+    return undefined;
+  }
+}
+
+async function onTerminal(shellPid: number, until: number): Promise<Listed[] | undefined> {
+  if (LINUX) {
+    const tty = linuxStat(shellPid)?.tty;
+    if (!(tty !== undefined && tty > 0)) return undefined;
+    let names: string[];
+    try {
+      names = fs.readdirSync('/proc');
+    } catch {
+      return undefined;
+    }
+    const listed: Listed[] = [];
+    for (const name of names) {
+      if (!/^\d+$/.test(name)) continue;
+      const s = linuxStat(Number(name));
+      if (s?.tty === tty) listed.push({ pid: Number(name), pgid: s.pgid });
+    }
+    return listed;
+  }
+  const all = await ps(['-A', '-o', 'pid=,pgid=,tty='], until);
+  if (all?.status !== 0) return undefined;
+  const rows = all.stdout.trim().split('\n').map((line) => line.trim().split(/\s+/));
+  const tty = rows.find((r) => Number(r[0]) === shellPid)?.[2];
+  if (tty === undefined || tty.startsWith('?')) return undefined;
+  return rows.filter((r) => r[2] === tty).map((r) => ({ pid: Number(r[0]), pgid: Number(r[1]) }));
+}
+
+// On Linux, a stopped process holds a SIGHUP until it's continued, so a group
+// gets SIGCONT once its SIGHUP is delivered. Any process in the session may
+// continue a process, whoever owns it. kill(-0) would signal our own group,
+// and kill(-1) every process we may signal.
+async function hangUp(listed: Listed[], shellPid: number, until: number): Promise<void> {
+  const members = listed.filter((p) => p.pid !== shellPid && p.pgid > 1);
+  if (!members.length) return;
+  const now = new Map<number, number>();
+  if (LINUX) {
+    for (const p of members) {
+      const s = linuxStat(p.pid);
+      if (s) now.set(p.pid, s.pgid);
+    }
+  } else {
+    const still = await ps(['-o', 'pid=,pgid=', '-p', members.map((p) => p.pid).join(',')], until);
+    for (const line of (still?.stdout ?? '').trim().split('\n')) {
+      const [pid, pgid] = line.trim().split(/\s+/).map(Number);
+      if (pid! > 0) now.set(pid!, pgid!);
+    }
+  }
+  const groups = new Set(members.filter((p) => now.get(p.pid) === p.pgid).map((p) => p.pgid));
+  for (const pgid of groups) {
+    try {
+      process.kill(-pgid, 'SIGHUP');
+    } catch {
+      continue;
+    }
+    try {
+      process.kill(-pgid, 'SIGCONT');
+    } catch {}
+  }
+}
+
 export class PersistentSessionServer extends EventEmitter {
   private sessions: Map<string, SessionInfo> = new Map();
   private readonly maxLogSize = 10000; // lines per session
@@ -452,13 +572,20 @@ export class PersistentSessionServer extends EventEmitter {
     const shellArgs = shell === 'wsl.exe' ? ['-d', 'Ubuntu', 'bash'] : [];
 
     // Create PTY instance
-    const ptyProcess = pty.spawn(shell, shellArgs, {
-      name: 'xterm-256color',  // Modern terminal with full mouse tracking support
-      cwd,
-      env,
-      cols: 120,
-      rows: 30
-    });
+    let ptyProcess: IPty;
+    try {
+      ptyProcess = pty.spawn(shell, shellArgs, {
+        name: 'xterm-256color',  // Modern terminal with full mouse tracking support
+        cwd,
+        env,
+        cols: 120,
+        rows: 30
+      });
+    } catch (e) {
+      const helper = unrunnableHelper();
+      if (!helper) throw e;
+      throw new Error(`${(e as Error).message} node-pty starts every shell through ${helper}, which isn't executable. Run chmod +x '${helper.replace(/'/g, "'\\''")}', then create the session again.`);
+    }
 
     const sessionInfo: SessionInfo = {
       id,
@@ -1988,12 +2115,20 @@ export class PersistentSessionServer extends EventEmitter {
   /**
    * Kill a session with optional graceful shutdown
    */
-  async killSession(sessionId: string, graceful: boolean = true): Promise<void> {
+  async killSession(sessionId: string, graceful: boolean = true, deadline: number = performance.now() + KILL_BUDGET_MS): Promise<void> {
     const session = this.sessions.get(sessionId);
     if (!session) return;
 
+    let listed: Listed[] | undefined;
     if (session.isAlive) {
       if (graceful) {
+        // A shell passes a hangup on only to the jobs in its job table, so
+        // never to a disowned job or one started from a subshell. So once the
+        // shell is gone or KILLed, the processes that were on its terminal are
+        // hung up here. The kernel clears their controlling terminal when the
+        // shell exits, so they're listed before the first SIGHUP.
+        if (process.platform !== 'win32') listed = await onTerminal(session.shell.pid, deadline - SHELL_WAIT_MS - SETTLE_MS);
+
         // SIGHUP is the "terminal went away" signal: an interactive shell
         // exits on it and resends it to its jobs. (SIGINT, used previously, is
         // IGNORED by an interactive bash — every graceful kill burned the full
@@ -2003,16 +2138,15 @@ export class PersistentSessionServer extends EventEmitter {
         // Linux (bash 5.2), a SIGHUP sent right after a command left the shell
         // running 1.5 s later in 39 of 120 trials, and a second SIGHUP, or an
         // Enter, ended it within about 30 ms each time.
-        session.shell.kill('SIGHUP');
+        if (session.isAlive) session.shell.kill('SIGHUP');
 
         // Wait up to 3 seconds for the process to exit gracefully
-        const timeout = 3000;
-        const startTime = Date.now();
-        let nextHangup = startTime + 500;
+        const until = Math.min(performance.now() + SHELL_WAIT_MS, deadline - SETTLE_MS);
+        let nextHangup = performance.now() + 500;
 
-        while (session.isAlive && Date.now() - startTime < timeout) {
+        while (session.isAlive && performance.now() < until) {
           await this.sleep(50);
-          if (session.isAlive && Date.now() >= nextHangup) {
+          if (session.isAlive && performance.now() >= nextHangup) {
             session.shell.kill('SIGHUP');
             nextHangup += 500;
           }
@@ -2030,20 +2164,21 @@ export class PersistentSessionServer extends EventEmitter {
     }
 
     // Brief settle so the exit handler (log flush, event) runs before removal
-    await this.sleep(50);
+    await this.sleep(SETTLE_MS);
+    if (listed) await hangUp(listed, session.shell.pid, deadline);
     this.cleanupTempFiles(session);
-    this.sessions.delete(sessionId);
+    if (this.sessions.get(sessionId) === session) this.sessions.delete(sessionId);
   }
 
   /**
    * Kill all sessions with optional graceful shutdown
    */
   async killAll(graceful: boolean = true): Promise<void> {
+    const deadline = performance.now() + KILL_BUDGET_MS;
     const killPromises = Array.from(this.sessions.keys()).map(id => 
-      this.killSession(id, graceful)
+      this.killSession(id, graceful, deadline)
     );
     await Promise.all(killPromises);
-    this.sessions.clear();
   }
 
   /**

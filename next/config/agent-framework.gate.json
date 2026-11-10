@@ -1,0 +1,9 @@
+{
+  "policies": [
+    {
+      "name": "terminal-wakes",
+      "match": { "source": "terminal", "tagsAny": ["terminal:ended", "terminal:waiting", "terminal:exited", "terminal:match"] },
+      "behavior": "always"
+    }
+  ]
+}

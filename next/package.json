@@ -1,0 +1,6 @@
+{
+  "name": "term-sessions-next",
+  "private": true,
+  "type": "module",
+  "description": "terminal-sessions 2.0 (next/README.md), beside 1.x in this package."
+}

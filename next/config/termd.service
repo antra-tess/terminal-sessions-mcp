@@ -1,0 +1,42 @@
+# systemd user unit: cp to ~/.config/systemd/user/termd.service, replace PACKAGE with the
+# installed package ("$(npm root -g)/term-sessions-mcp"; write any % in it as %%). If a daemon
+# runs, `tsm daemon stop` it first: this unit's daemon exits when it finds another. Then
+#   systemctl --user daemon-reload && systemctl --user enable --now termd
+# termd-launch.sh finds node (nvm's default version, Volta, /usr/local, ~/.local; or
+# Environment=TSM_NODE_BIN=/path/to/node), puts those directories on PATH and starts in $HOME.
+# Logs go to the journal: journalctl --user -u termd. Without this unit, the first tsm-relay or
+# tsm that finds no daemon starts one: as a transient unit of its own where systemd-run works,
+# otherwise detached, in the starter's own control group, where stopping the starter's service
+# stops the daemon too.
+[Unit]
+Description=terminal sessions daemon (termd)
+
+[Service]
+ExecStart=/bin/sh "PACKAGE/next/config/termd-launch.sh"
+WorkingDirectory=%h
+# No UMask= here: the sessions' shells inherit this mask, so files a session creates keep the
+# usual permissions; termd makes its own directory and socket owner-only by mode.
+Restart=on-failure
+# The sessions' shells and everything they run are in this service's cgroup. When the kernel
+# kills one of them for memory, systemd's default (OOMPolicy=stop) stops the whole service and
+# every shell with it, for one build's peak. With continue, termd keeps serving. The shells start
+# with a raised oom_score_adj (--session-oom-score-adj, default 200), so the kernel takes one of
+# them before termd; on a shared host, where that preference counts against other users' work
+# too, pass a lower value or 0.
+OOMPolicy=continue
+# On stop, systemd signals termd alone (KillMode=process), not the whole cgroup. termd closes
+# each session as `close` does: it hangs up the shell and every process it lists on its terminal,
+# a disowned job included. A process started with setsid, which leaves the terminal, or with
+# nohup, which ignores the hangup, lives on. KillMode=mixed would SIGKILL whatever
+# is left in the cgroup once termd has exited, on every stop: systemd.kill(5) says the
+# termination request is repeated with SIGKILL if processes remain after the main process of a
+# unit has exited.
+KillMode=process
+KillSignal=SIGTERM
+# 20 s is the time termd's stop gives every session's close, counted from when it handles
+# SIGTERM, so a SIGKILL can land as a close's last steps run. Its log names each close as it
+# begins, so one cut short has no line saying how it ended.
+TimeoutStopSec=20
+
+[Install]
+WantedBy=default.target
