@@ -168,7 +168,8 @@ export class SessionAPI {
           result = await this.server.createSession(params.id, {
             cwd: params.cwd,
             env: params.env,
-            shell: params.shell
+            shell: params.shell,
+            persistent: params.persistent
           });
           break;
           
@@ -191,7 +192,15 @@ export class SessionAPI {
         case 'session.list':
           result = this.server.listSessions();
           break;
-          
+
+        case 'session.setPersistent':
+          result = this.server.setSessionPersistent(params.sessionId, params.persistent);
+          break;
+
+        case 'session.pruneIdle':
+          result = await this.server.pruneIdleSessions(params);
+          break;
+
         case 'session.kill':
           await this.server.killSession(params.sessionId, params.graceful);
           result = { success: true };
