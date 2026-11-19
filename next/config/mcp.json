@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "terminal": {
+      "command": "tsm-relay",
+      "args": ["--scope", "default"]
+    }
+  }
+}

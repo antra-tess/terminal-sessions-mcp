@@ -1,8 +1,71 @@
 # Changelog
 
-## Unreleased
+## Unreleased — 2.0, persistent shells for agents, beside 1.x
 
-### Removed
+A new implementation ships beside the 1.x session server, MCP bridge and CLI. It lives in `next/`
+(`next/README.md`); its binaries are `termd`, `tsm` and `tsm-relay`. 2.0 removes or renames nothing
+of 1.x: `terminal-sessions-mcp`, `session-server` and `session-cli` run 1.x, and 2.0 changes what's
+listed below: their graceful kill, under "Changed", and three fixes, under "Fixed in 1.x". Otherwise,
+what reaches them is the package they share with 2.0: a narrower Node range (`engines`),
+`npm run build` and `npm test` building 2.0 too, and 2.0's dependencies installing with it. The lockfile also moves `@types/node` from 20 to 22, and `express-rate-limit`, `hono` and `ip-address` up a patch release each.
+
+### Added
+
+- **One daemon per user, `termd`,** holding every session's shell, on a Unix socket only the user
+  can open. Hosts launch `tsm-relay` over stdio; the first relay or `tsm` that finds no daemon
+  starts one. `--scope` on the relay keeps two hosts' sessions apart.
+- **Sessions are your own login shell,** persisting across calls, connections and host restarts.
+  bash, zsh and fish start with your startup files and get the session's integration; any other
+  shell starts with no arguments and runs without it. A daemon restart ends them. A call naming one
+  is then refused, and says why.
+- **Nine tools:** `open`, `run`, `send`, `look`, `read`, `stop`, `integrate`, `list` and `close`. The results
+  of `open`, `run`, `send`, `look`, `read`, `stop` and `integrate` open with the session's status line:
+  what is in front of the shell now and its directory, and, in `run`'s and a report's, the command's
+  exit status (or "status unknown", or the shell's exit for a command that ends the shell) and duration. `list` gives a line
+  for each session, `close` says how the shell ended, and a refused call says why. `close` hangs up
+  the shell and every process it lists on its terminal; a process started with `setsid` or `nohup`
+  outlives it, and so does one the daemon may not signal, such as another user's, which the result
+  names; `force` KILLs, with no hangup and no grace. `run`'s
+  `structuredContent` gives the command's `exitCode` and its own `output` as values. `run` types only at the prompt; `send` types
+  exactly what it is given and returns its effect; with `paste: true` it sends the text as a
+  bracketed paste and the keys after it, for a program such as Claude Code that takes long typed
+  text as a paste. `look` gives a full-screen program's screen while it is up. `integrate` gives a shell reached through a typed
+  `ssh`, `su` or `docker exec` the session's integration, so `run` works there with statuses.
+- **Wakes over MCPL** (feature set `terminal.events`): a command ended that no call showed,
+  a program waiting for input (on the kernel's evidence, on Linux), a shell exited, a pattern asked
+  for appeared. Nothing else wakes.
+- **The CLI, `tsm`,** calls the same tools; nothing it is shown counts as seen. `tsm --json` prints
+  each result's `structuredContent` as one line of JSON.
+- Shipped host and supervisor configurations in `next/config/`. In the repository, not the package:
+  checks against agent-framework's and mcpl-cc-bridge's real host code, in `next/acceptance/`.
+
+### Changed
+
+- Node 22.12 or later, below 25 (`engines`: `>=22.12.0 <25.0.0`): Node 20 reached its end of life on 2026-04-30; the 1.x `session-cli` `require`s `strip-ansi` 7, which ships only as an ES module, and `require` loads one from 22.12 on Node 22, so Node 21 and 22.0 to 22.11 are out. CI runs Node 22 and 24.
+- `npm run build` compiles both trees; `npm test` runs 1.x's suite and `npm run test:next` 2.0's.
+- New dependencies: `@animalabs/mcpl-core` and `@xterm/headless` 6.0.0.
+- **1.x's graceful `killSession` and `killAll` hang up every process they list on the session's terminal**
+  once the shell is gone, as 2.0's `close` does. A disowned job, or one started from a subshell, no
+  longer outlives a graceful kill, unless it ignores the hangup, or the listing fails or runs out of
+  time. A process started with `setsid` or `nohup` still does, and so does one the kill may not
+  signal, such as another user's, which it doesn't report. A forced
+  kill still KILLs the shell alone, and on Windows the kill is as before. Listing the terminal's
+  processes, the 3 s wait for the shell and the hangup share one deadline, 10 s from the kill's
+  start: the time `RobustSessionClient` gives a request. A kill that uses all 10 s can still answer
+  after the client has given up. The session server's shutdown runs a graceful `killAll`, so a
+  supervisor stopping it should allow it those 10 s.
+
+### Fixed in 1.x
+
+- **On macOS, a shell can start after an `npm install`.** node-pty 1.1.0 ships its prebuilt
+  `spawn-helper` without its execute bit, and `postinstall` made only `build/Release`'s executable.
+  It now makes executable every `spawn-helper` node-pty can load.
+- **When a shell can't start because that helper isn't executable,** as after an install that skips
+  lifecycle scripts, the error names the helper and gives the `chmod` that fixes it.
+- **`killAll` no longer forgets a session opened while it runs.** It cleared every entry once its
+  kills were done, so that session's shell lived on with nothing to reach it.
+
+### Removed from 1.x
 
 - **The web GUI, and the `takeScreenshot` tool that rendered through it.**
   The session server no longer starts a GUI on `GUI_PORT` (3200), the
